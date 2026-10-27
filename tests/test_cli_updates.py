@@ -250,12 +250,15 @@ def test_the_upgrade_command_follows_the_install(tmp_path, monkeypatch):
     url = clone.as_uri()
 
     editable = updates.upgrade_command(_dist({"url": url, "dir_info": {"editable": True}}))
-    assert editable == f"git -C {clone} pull && /venv/bin/python -m pip install -e {clone}"
     local = updates.upgrade_command(_dist({"url": url, "dir_info": {}}, installer="uv"))
-    assert local == f"git -C {clone} pull && uv pip install --python /venv/bin/python {clone}"
     vcs = updates.upgrade_command(_dist({"url": "https://github.com/TauricResearch/TradingAgents.git",
                                          "vcs_info": {"vcs": "git", "commit_id": "abc"}}))
-    assert vcs == "/venv/bin/python -m pip install -U git+https://github.com/TauricResearch/TradingAgents.git"
+    if os.name == "nt":
+        assert editable is None and local is None and vcs is None
+    else:
+        assert editable == f"git -C {clone} pull && /venv/bin/python -m pip install -e {clone}"
+        assert local == f"git -C {clone} pull && uv pip install --python /venv/bin/python {clone}"
+        assert vcs == "/venv/bin/python -m pip install -U git+https://github.com/TauricResearch/TradingAgents.git"
 
 
 @pytest.mark.unit
@@ -319,7 +322,10 @@ def test_a_uv_git_install_is_upgraded_with_uv(monkeypatch):
     monkeypatch.setattr(updates.sys, "executable", "/venv/bin/python")
     vcs = updates.upgrade_command(_dist({"url": "https://github.com/TauricResearch/TradingAgents.git",
                                          "vcs_info": {"vcs": "git"}}, installer="uv"))
-    assert vcs == "uv pip install --python /venv/bin/python -U git+https://github.com/TauricResearch/TradingAgents.git"
+    if os.name == "nt":
+        assert vcs is None
+    else:
+        assert vcs == "uv pip install --python /venv/bin/python -U git+https://github.com/TauricResearch/TradingAgents.git"
 
 
 @pytest.mark.unit
