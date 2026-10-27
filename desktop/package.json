@@ -1,0 +1,14 @@
+{
+  "name": "tradingagents-desktop-local",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local desktop launcher for the official TradingAgents CLI",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test.js stop.test.js model-service.test.js repo-path.test.js ticker.test.js"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0"
+  }
+}

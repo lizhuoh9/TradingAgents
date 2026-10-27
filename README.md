@@ -1,3 +1,5 @@
+> Windows 桌面应用及安装说明：[desktop/README.md](desktop/README.md)。桌面应用使用独立官方源码目录运行分析。
+
 <p align="center">
   <img src="tradingagents/assets/tauric-logo.svg" width="60%" alt="Tauric Research">
 </p>

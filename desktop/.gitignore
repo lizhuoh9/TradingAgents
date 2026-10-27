@@ -1,0 +1,7 @@
+node_modules/
+local-data/
+update-incomplete
+__pycache__/
+.env
+.env.*
+!.env.example

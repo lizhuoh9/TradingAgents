@@ -1,0 +1,171 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { validate } = require('./validate');
+const { createMask } = require('./mask');
+const { createControlStripper } = require('./strip-control');
+const { createProfileStore } = require('./profile-store');
+const { createDataKeyStore } = require('./data-key-store');
+const { createReportStore } = require('./report-store');
+const { cleanEnvironment } = require('./environment');
+const { createLatestQueue } = require('./latest-queue');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+test('accepts normal tickers and rejects invalid input', () => {
+  validate({ ticker: '600519.SS', date: '2026-10-27', key: 'test' });
+  for (const input of [
+    { ticker: '../x', date: '2026-10-27', key: 'x' },
+    { ticker: 'NVDA', date: '2026-02-30', key: 'x' },
+  ]) assert.throws(() => validate(input));
+});
+test('profiles encrypt secrets, preserve them on edit, and isolate endpoints', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ta-profiles-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const storage = { isEncryptionAvailable: () => true, encryptString: s => Buffer.from(s).reverse(), decryptString: b => Buffer.from(b).reverse().toString() };
+  const file = path.join(dir, 'profiles.bin');
+  const store = createProfileStore(file, storage);
+  const input = { name: 'Test', provider: 'openai_compatible', model: 'model-a', baseUrl: 'https://example.com/v1', key: 'secret-123' };
+  let data = store.put(input);
+  const id = data.selectedId;
+  assert.equal(data.profiles[0].hasKey, true);
+  assert.equal(JSON.stringify(data).includes('secret-123'), false);
+  assert.equal(fs.readFileSync(file).includes(Buffer.from('secret-123')), false);
+  store.put({ ...input, id, model: 'model-b', key: '' });
+  assert.equal(store.get(id).key, 'secret-123');
+  assert.throws(() => store.put({ ...input, id, baseUrl: 'https://another.example/v1', key: '' }));
+  assert.throws(() => store.put({ ...input, baseUrl: 'https://name:password@example.com/v1' }));
+  assert.throws(() => store.put({ ...input, baseUrl: 'https://example.com/secret-123' }));
+  assert.equal(store.delete(id).profiles.length, 0);
+});
+test('unreadable saved connections are not replaced', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ta-unreadable-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'profiles.bin');
+  const contents = Buffer.from('existing-encrypted-data');
+  fs.writeFileSync(file, contents);
+  const storage = { isEncryptionAvailable: () => true, decryptString() { throw new Error('decrypt failed'); } };
+  const store = createProfileStore(file, storage);
+  assert.throws(() => store.list(), /无法解密/);
+  assert.throws(() => store.put({ name: 'new', provider: 'openai_compatible', model: 'model', baseUrl: 'https://example.com/v1' }), /无法解密/);
+  assert.deepEqual(fs.readFileSync(file), contents);
+  const backup = store.backupUnreadable();
+  assert.deepEqual(fs.readFileSync(backup), contents);
+  assert.equal(fs.existsSync(file), false);
+  assert.deepEqual(store.list(), { profiles: [], selectedId: null });
+});
+test('invalid saved connection structure can be backed up', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ta-bad-profile-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'profiles.bin');
+  fs.writeFileSync(file, 'encrypted');
+  const store = createProfileStore(file, { isEncryptionAvailable: () => true, decryptString: () => '{"profiles":null}' });
+  assert.throws(() => store.list(), /格式无效/);
+  const backup = store.backupUnreadable();
+  assert.equal(fs.readFileSync(backup, 'utf8'), 'encrypted');
+});
+test('report reader lists dated reports and refuses arbitrary paths', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ta-reports-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const folder = path.join(dir, '2026-10-27', 'NVDA', 'run-123', 'reports', 'NVDA_123');
+  fs.mkdirSync(folder, { recursive: true });
+  fs.writeFileSync(path.join(folder, 'complete_report.md'), '# Test report');
+  const store = createReportStore(dir);
+  const nextFolder = path.join(dir, '2026-10-27', 'NVDA', 'run-456', 'reports', 'NVDA_456');
+  fs.mkdirSync(nextFolder, { recursive: true });
+  fs.writeFileSync(path.join(nextFolder, 'complete_report.md'), '# Later report');
+  const reports = store.list();
+  assert.equal(new Set(reports.map(report => report.title)).size, 2);
+  const report = reports.find(item => item.title.startsWith('NVDA_123'));
+  assert.equal(report.date, '2026-10-27');
+  assert.equal(report.ticker, 'NVDA');
+  assert.equal(store.read(report.id).text, '# Test report');
+  fs.writeFileSync(path.join(dir, '2026-10-27', 'NVDA', 'run-123', '.run-incomplete'), 'incomplete');
+  assert.equal(store.list().length, 1);
+  assert.equal(store.list({ includeIncomplete: true }).length, 2);
+  assert.throws(() => store.read(report.id));
+  assert.throws(() => store.read('../other'));
+});
+test('masks a key split across output chunks', () => {
+  const mask = createMask('sk-abcdef');
+  const output = mask('hello sk-') + mask('abc') + mask('def world') + mask('', true);
+  assert.equal(output, 'hello [REDACTED] world');
+});
+test('masks model and data keys split over separate chunks', () => {
+  const mask = createMask(['modelSecret0123', 'fredSecret4567']);
+  const output = ['model modelSe', 'cret0123 data fredSec', 'ret4567 end'].map(chunk => mask(chunk)).join('') + mask('', true);
+  assert.equal(output, 'model [REDACTED] data [REDACTED] end');
+});
+test('shared mask blocks a secret split between stdout and stderr', () => {
+  const mask = createMask(['modelSecret0123', 'fredSecret4567']);
+  const stdout = 'prefix fredSec';
+  const stderr = 'ret4567 suffix';
+  const output = mask(stdout) + mask(stderr) + mask('', true);
+  assert.equal(output, 'prefix [REDACTED] suffix');
+});
+test('data key uses separate encryption, preserves existing values on blank and never replaces unreadable data', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ta-fred-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'key.bin');
+  const storage = { isEncryptionAvailable: () => true, encryptString: s => Buffer.from(s).reverse(), decryptString: b => Buffer.from(b).reverse().toString() };
+  const store = createDataKeyStore(file, storage);
+  assert.deepEqual(store.status(), { hasKey: false });
+  const fakeKey = '0123456789abcdef'.repeat(2);
+  assert.deepEqual(store.put(fakeKey), { hasKey: true });
+  assert.equal(fs.readFileSync(file).includes(Buffer.from(fakeKey)), false);
+  assert.deepEqual(store.put(''), { hasKey: true });
+  assert.equal(store.get(), fakeKey);
+  assert.throws(() => store.put('bad key'));
+  assert.throws(() => store.put('F'.repeat(32)));
+  const original = fs.readFileSync(file);
+  const bad = createDataKeyStore(file, { isEncryptionAvailable: () => true, decryptString() { throw Error('failed'); } });
+  assert.throws(() => bad.put('a'.repeat(32)), /无法解密/);
+  assert.throws(() => bad.remove(), /无法解密/);
+  assert.deepEqual(fs.readFileSync(file), original);
+  const backup = bad.backupUnreadable();
+  assert.deepEqual(fs.readFileSync(backup), original);
+  assert.deepEqual(bad.status(), { hasKey: false });
+  fs.writeFileSync(file, original);
+  const unavailable = createDataKeyStore(file, { isEncryptionAvailable: () => false });
+  assert.throws(() => unavailable.backupUnreadable(), /系统加密服务不可用/);
+  assert.deepEqual(fs.readFileSync(file), original);
+  assert.throws(() => store.backupUnreadable(), /无需重新配置/);
+  assert.deepEqual(store.remove(), { hasKey: false });
+});
+test('malformed saved data key can be backed up', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ta-bad-fred-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'key.bin');
+  fs.writeFileSync(file, 'encrypted');
+  const store = createDataKeyStore(file, { isEncryptionAvailable: () => true, decryptString: () => 'invalid' });
+  assert.throws(() => store.status(), /格式无效/);
+  const backup = store.backupUnreadable();
+  assert.equal(fs.readFileSync(backup, 'utf8'), 'encrypted');
+});
+test('strips split control sequences before masking secrets', () => {
+  const mask = createMask('example-123');
+  const strip = createControlStripper();
+  const output = ['key example-\x1b[', '0m1', '23 done'].map(chunk => mask(strip(chunk))).join('') + mask('', true);
+  assert.equal(output, 'key [REDACTED] done');
+});
+test('does not inherit model credentials or hidden endpoint overrides', () => {
+  const env = cleanEnvironment({ PATH: 'path', OPENAI_BASE_URL: 'https://elsewhere', ANTHROPIC_BASE_URL: 'https://elsewhere', GOOGLE_GENAI_USE_VERTEXAI: '1', GEMINI_API_KEY: 'old', ANY_PROVIDER_API_KEY: 'old', TRADINGAGENTS_LLM_PROVIDER: 'other', TRADING_DESKTOP_API_KEY: 'old', FRED_API_KEY: 'data-key', SEC_EDGAR_USER_AGENT: 'private', LANGCHAIN_TRACING_V2: 'true', LANGSMITH_ENDPOINT: 'https://elsewhere' });
+  assert.deepEqual(env, { PATH: 'path', PYTHONUTF8: '1', PYTHON_DOTENV_DISABLED: '1', LANGCHAIN_TRACING: 'false', LANGCHAIN_TRACING_V2: 'false', LANGSMITH_TRACING: 'false', LANGSMITH_TRACING_V2: 'false' });
+});
+test('model catalog requests run one at a time and keep the latest queued input', async () => {
+  const started = [];
+  const callbacks = [];
+  const queue = createLatestQueue(value => new Promise(resolve => { started.push(value); callbacks.push(resolve); }));
+  const first = queue.submit('first');
+  const obsolete = queue.submit('obsolete');
+  const last = queue.submit('last');
+  assert.deepEqual(await obsolete, { superseded: true });
+  assert.deepEqual(started, ['first']);
+  callbacks.shift()('one');
+  assert.equal(await first, 'one');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(started, ['first', 'last']);
+  callbacks.shift()('three');
+  assert.equal(await last, 'three');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(queue.isBusy(), false);
+});

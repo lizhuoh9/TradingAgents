@@ -1,0 +1,22 @@
+const { contextBridge, ipcRenderer } = require('electron');
+contextBridge.exposeInMainWorld('desktop', {
+  run: input => ipcRenderer.invoke('run', input),
+  stop: () => ipcRenderer.invoke('stop'),
+  onStopError: callback => ipcRenderer.on('stop-error', (_event, message) => callback(message)),
+  update: () => ipcRenderer.invoke('update'),
+  reports: () => ipcRenderer.invoke('reports'),
+  profiles: () => ipcRenderer.invoke('profiles'),
+  listModels: input => ipcRenderer.invoke('model-catalog', input),
+  fetchModels: input => ipcRenderer.invoke('models-fetch', input),
+  saveProfile: input => ipcRenderer.invoke('profile-save', input),
+  selectProfile: id => ipcRenderer.invoke('profile-select', id),
+  deleteProfile: id => ipcRenderer.invoke('profile-delete', id),
+  backupUnreadableProfiles: () => ipcRenderer.invoke('profile-backup-unreadable'),
+  fredStatus: () => ipcRenderer.invoke('fred-status'),
+  saveFredKey: key => ipcRenderer.invoke('fred-save', key),
+  deleteFredKey: () => ipcRenderer.invoke('fred-delete'),
+  backupUnreadableFredKey: () => ipcRenderer.invoke('fred-backup-unreadable'),
+  reportsList: () => ipcRenderer.invoke('reports-list'),
+  readReport: id => ipcRenderer.invoke('report-read', id),
+  onLog: callback => ipcRenderer.on('log', (_event, text) => callback(text)),
+});
