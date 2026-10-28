@@ -155,7 +155,7 @@ else app.whenReady().then(() => {
         if (win.isDestroyed()) return;
         if (progress.status === 'running') win.webContents.send('log', `\n──── ${progress.ticker} · 开始分析 ────\n`);
         if (progress.status === 'failed') win.webContents.send('log', `\n${progress.ticker} 分析未完成，请查看上方日志。\n`);
-        win.webContents.send('batch-progress', progress);
+        win.webContents.send('batch-progress', { ...progress, date: input.date });
       },
     });
     try { return await batchRunner.start(tickers); }

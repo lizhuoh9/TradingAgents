@@ -77,6 +77,7 @@ else:
     await page.click('#watch-stop');
     await page.waitForFunction(() => document.querySelector('#watch-message').textContent.includes('批次已停止'), null, { timeout: 30000 });
     const events = await page.evaluate(() => window.__batchEvents);
+    assert.equal(events.find(e => e.ticker === 'AAPL' && e.status === 'completed').date, await page.inputValue('#watch-date'));
     assert.ok(events.some(e => e.ticker === 'AAPL' && e.status === 'completed' && e.reportId));
     assert.ok(events.some(e => e.ticker === 'MSFT' && e.status === 'stopped'));
     assert.ok(events.some(e => e.ticker === 'GOOG' && e.status === 'cancelled'));

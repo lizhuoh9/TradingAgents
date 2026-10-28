@@ -760,6 +760,8 @@ function renderWatchlist() {
   $('watch-empty').hidden = watchlist.length > 0;
   $('watch-run').disabled = batchBusy || operationBusy || !watchlist.length;
   $('watch-add-form').querySelector('button').disabled = batchBusy;
+  $('watch-date').disabled = batchBusy;
+  $('watch-profile').disabled = batchBusy;
   $('watch-stop').hidden = !batchBusy;
   for (const item of watchlist) {
     const row = document.createElement('article'); row.className = 'watch-item';
@@ -774,7 +776,7 @@ function renderWatchlist() {
     info.append(status, meta);
     const actions = document.createElement('div'); actions.className = 'watch-item-actions';
     if (result?.reportId) {
-      const open = document.createElement('button'); open.type = 'button'; open.className = 'text-button'; open.textContent = '阅读报告 →';
+      const open = document.createElement('button'); open.type = 'button'; open.className = 'text-button'; open.textContent = result.previousReport ? '阅读上次报告 →' : '阅读报告 →';
       open.addEventListener('click', () => openWatchReport(result.reportId)); actions.append(open);
     }
     const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'text-button'; remove.textContent = '移除'; remove.disabled = batchBusy;
@@ -800,12 +802,22 @@ async function loadWatchReports(revision) {
     const reports = await window.desktop.reportsList();
     for (const item of watchlist) {
       if (revision !== watchRevision) return;
-      if (watchResults.has(item.ticker)) continue;
+      if (watchResults.get(item.ticker)?.reportId) continue;
       const entry = reports.find(report => report.ticker === item.ticker);
       if (!entry) continue;
+      const pending = watchResults.get(item.ticker);
+      if (pending) {
+        pending.reportId = entry.id; pending.previousReport = true; renderWatchlist();
+        continue;
+      }
       try {
         const report = await window.desktop.readReport(entry.id);
-        if (revision !== watchRevision || watchResults.has(item.ticker)) continue;
+        if (revision !== watchRevision) continue;
+        const current = watchResults.get(item.ticker);
+        if (current) {
+          if (!current.reportId) { current.reportId = entry.id; current.previousReport = true; renderWatchlist(); }
+          continue;
+        }
         watchResults.set(item.ticker, { label: renderMarkdown(report.text, true), detail: entry.date || '已保存报告', reportId: entry.id });
         renderWatchlist();
       } catch { /* The report may have disappeared since the list was read. */ }
@@ -852,7 +864,8 @@ async function updateWatchProgress(event) {
   const labels = { waiting: '等待分析', running: '分析中…', completed: '报告已保存', failed: '分析失败', stopped: '已停止', cancelled: '已取消' };
   if (!event || !labels[event.status]) return;
   const detail = event.error || (event.code != null && event.code !== 0 ? `退出码 ${event.code}` : '');
-  const item = { label: labels[event.status], detail, reportId: event.reportId || null };
+  const previousReportId = watchResults.get(event.ticker)?.reportId || null;
+  const item = { label: labels[event.status], detail, reportId: event.reportId || previousReportId, previousReport: !event.reportId && Boolean(previousReportId) };
   watchResults.set(event.ticker, item); renderWatchlist();
   if (event.status === 'completed' && event.reportId && window.desktop.readReport) {
     try {
@@ -884,7 +897,10 @@ $('watch-run').addEventListener('click', async () => {
   $('stop-run').hidden = false; $('stop-run').disabled = false;
   $('open-latest').hidden = true; $('log').textContent = '';
   $('status').textContent = '批量分析中…'; document.querySelector('.status-pill').dataset.state = 'busy';
-  for (const ticker of tickers) watchResults.set(ticker, { label: '等待分析', detail: '' });
+  for (const ticker of tickers) {
+    const previousReportId = watchResults.get(ticker)?.reportId || null;
+    watchResults.set(ticker, { label: '等待分析', detail: '', reportId: previousReportId, previousReport: Boolean(previousReportId) });
+  }
   $('watch-message').textContent = `正在逐只分析 ${tickers.length} 个标的。`; renderWatchlist();
   try {
     const result = await window.desktop.runBatch({ tickers, date, profileId });
@@ -895,7 +911,7 @@ $('watch-run').addEventListener('click', async () => {
   } catch (error) {
     $('watch-message').textContent = '批量分析失败：' + error.message;
     $('status').textContent = '批量分析失败'; document.querySelector('.status-pill').dataset.state = 'error';
-    for (const ticker of tickers) if (watchResults.get(ticker)?.label === '等待分析') watchResults.set(ticker, { label: '未开始', detail: '批次启动失败' });
+    for (const ticker of tickers) if (watchResults.get(ticker)?.label === '等待分析') watchResults.set(ticker, { ...watchResults.get(ticker), label: '未开始', detail: '批次启动失败' });
   } finally {
     batchBusy = analysisBusy = operationBusy = false;
     $('run').disabled = $('update').disabled = false;

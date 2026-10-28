@@ -38,10 +38,18 @@ const assert = require('node:assert/strict');
     await page.waitForFunction(() => document.querySelector('#watch-total').textContent === '2');
     await page.fill('#watch-ticker', 'MSFT'); await page.click('#watch-add-form button');
     assert.equal(await page.locator('.watch-item').count(), 2);
+    await page.click('.navigation [data-page="watchlist"]');
+    await page.waitForFunction(() => document.querySelector('.watch-item').textContent.includes('偏买 · 增持'));
     await page.click('#watch-run');
     assert.deepEqual(await page.evaluate(() => window.__batchArgs.tickers), ['AAPL', 'MSFT']);
-    await page.evaluate(() => window.__progress({ ticker: 'AAPL', status: 'completed', code: 0, reportId: 'report' }));
+    assert.equal(await page.locator('#watch-date').isDisabled(), true);
+    assert.match(await page.locator('.watch-item').first().innerText(), /阅读上次报告/);
+    await page.evaluate(() => { document.querySelector('#watch-date').value = '2026-11-01'; window.__progress({ ticker: 'AAPL', status: 'failed', code: 1, date: '2026-10-28' }); });
+    assert.match(await page.locator('.watch-item').first().innerText(), /阅读上次报告/);
+    await page.evaluate(() => window.__progress({ ticker: 'AAPL', status: 'completed', code: 0, reportId: 'report', date: '2026-10-28' }));
     await page.waitForFunction(() => document.querySelector('.watch-item').textContent.includes('偏买 · 增持'));
+    assert.match(await page.locator('.watch-item').first().innerText(), /2026-10-28/);
+    assert.doesNotMatch(await page.locator('.watch-item').first().innerText(), /2026-11-01/);
     if (process.env.WATCHLIST_SCREENSHOT) await page.screenshot({ path: process.env.WATCHLIST_SCREENSHOT });
     await page.click('#watch-stop');
     assert.match(await page.textContent('#watch-message'), /停止/);
@@ -77,6 +85,25 @@ const assert = require('node:assert/strict');
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     }
     assert.deepEqual(external, []);
+    const race = await browser.newPage();
+    await race.addInitScript(() => {
+      window.desktop = {
+        onLog() {}, onStopError() {}, onBatchProgress() {},
+        profiles: async () => ({ profiles: [{ id: 'profile', name: 'Test', model: 'test' }], selectedId: 'profile' }),
+        watchlist: async () => [{ ticker: 'AAPL', name: '' }],
+        reportsList: async () => [{ id: 'old', ticker: 'AAPL', date: '2026-10-27', title: 'Old' }],
+        readReport: () => new Promise(resolve => { window.__releaseOld = () => resolve({ text: '# Trading Analysis Report: AAPL\n\n- Rating: Hold' }); }),
+        runBatch: () => new Promise(() => {}),
+      };
+    });
+    await race.goto(pathToFileURL(path.join(__dirname, 'index.html')).href);
+    await race.click('.navigation [data-page="watchlist"]');
+    await race.waitForFunction(() => document.querySelector('.watch-item') && window.__releaseOld);
+    await race.click('#watch-run');
+    await race.evaluate(() => window.__releaseOld());
+    await race.waitForFunction(() => document.querySelector('.watch-item').textContent.includes('阅读上次报告'));
+    assert.match(await race.locator('.watch-item').innerText(), /等待分析/);
+    await race.close();
     console.log('Watchlist UI passed: add, deduplication, batch status, stop, final rating and explicit candidate screening.');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
