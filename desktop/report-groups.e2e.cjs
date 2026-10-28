@@ -100,7 +100,41 @@ const assert = require('node:assert/strict');
     await page.waitForFunction(() => /名称|自选/.test(document.querySelector('#reports-status').textContent));
     assert.equal(await page.locator('.report-item').count(), 9);
     assert.equal(await page.getByRole('button', { name: /NVDA/ }).locator('strong').innerText(), '英伟达');
+
+    // A watchlist report can open before the report library's name lookup finishes.
+    const delayed = await browser.newPage();
+    delayed.on('request', request => { if (/^https?:/i.test(request.url())) external.push(request.url()); });
+    await delayed.addInitScript(() => {
+      const items = [{ ticker: 'LOCAL', name: '延迟读取公司' }];
+      window.__nameReads = 0;
+      window.__lastReadReport = null;
+      window.desktop = {
+        onLog() {}, onStopError() {},
+        profiles: async () => ({ profiles: [], selectedId: null }),
+        watchlist: async () => {
+          if (++window.__nameReads === 1) return items;
+          return new Promise(resolve => { window.__releaseNames = () => resolve(items); });
+        },
+        reportsList: async () => [{ id: 'local-report', ticker: 'LOCAL', date: '2026-10-27', title: '原始报告文件名' }],
+        readReport: async id => {
+          window.__lastReadReport = id;
+          return { title: '原始报告文件名', text: '# Trading Analysis Report: LOCAL\n\n- Rating: Hold' };
+        },
+      };
+    });
+    await delayed.goto(pathToFileURL(path.join(__dirname, 'index.html')).href);
+    await delayed.click('.navigation [data-page="watchlist"]');
+    await delayed.getByRole('button', { name: '阅读报告 →' }).click();
+    await delayed.waitForFunction(() => typeof window.__releaseNames === 'function' && !document.querySelector('#reader-document').hidden);
+    assert.equal(await delayed.evaluate(() => window.__nameReads), 2);
+    await delayed.evaluate(() => window.__releaseNames());
+    await delayed.waitForFunction(() => document.querySelector('#document-title').textContent === '延迟读取公司 研究报告');
+    assert.equal(await delayed.locator('.report-item.selected strong').innerText(), '延迟读取公司');
+    assert.match(await delayed.locator('#report-meta').innerText(), /LOCAL/);
+    assert.equal(await delayed.evaluate(() => window.__lastReadReport), 'local-report');
+    await delayed.close();
+
     assert.deepEqual(external, []);
-    console.log('Report groups passed: dates, names and codes, legacy aliases, local names, unavailable name store, safe text, search, selection and layout.');
+    console.log('Report groups passed: dates, names and codes, legacy aliases, local/delayed names, unavailable name store, safe text, search, selection and layout.');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

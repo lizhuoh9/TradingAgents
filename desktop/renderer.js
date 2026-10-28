@@ -462,6 +462,8 @@ async function loadReports() {
     reportStockNames = new Map(names.items.filter(item => item.name).map(item => [item.ticker, item.name]));
     reportNameWarning = names.failed ? '本地自选名称读取失败，未识别的标的暂显示代码。' : '';
     renderReports();
+    const selected = reports.find(entry => entry.id === selectedReportId);
+    if (selected?.ticker && !$('reader-document').hidden) $('document-title').textContent = `${stockName(selected.ticker)} 研究报告`;
     return reports;
   } catch (error) { if (request === reportRequest) $('reports-status').textContent = '读取报告失败：' + error.message; }
 }
