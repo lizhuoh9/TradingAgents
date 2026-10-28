@@ -6,6 +6,8 @@ let editingId = null;
 let reportRequest = 0;
 let readRequest = 0;
 let reportsCache = [];
+let reportStockNames = new Map();
+let reportNameWarning = '';
 let selectedReportId = null;
 const reportGroupsOpen = new Map();
 let latestReportId = null;
@@ -451,12 +453,21 @@ async function loadReports() {
   const request = ++reportRequest;
   $('reports-status').textContent = '正在读取…';
   try {
-    const reports = await window.desktop.reportsList();
+    const [reports, names] = await Promise.all([
+      window.desktop.reportsList(),
+      window.desktop.watchlist ? window.desktop.watchlist().then(items => ({ items })).catch(() => ({ items: [], failed: true })) : { items: [] },
+    ]);
     if (request !== reportRequest) return;
     reportsCache = reports;
+    reportStockNames = new Map(names.items.filter(item => item.name).map(item => [item.ticker, item.name]));
+    reportNameWarning = names.failed ? '本地自选名称读取失败，未识别的标的暂显示代码。' : '';
     renderReports();
     return reports;
   } catch (error) { if (request === reportRequest) $('reports-status').textContent = '读取报告失败：' + error.message; }
+}
+function stockName(ticker, savedName = '') {
+  const code = String(ticker || '').trim().toUpperCase();
+  return savedName || reportStockNames.get(code) || marketNames.get(code) || ticker || '历史报告';
 }
 function reportGroupKey(report) {
   const date = String(report.date || '');
@@ -465,11 +476,12 @@ function reportGroupKey(report) {
 }
 function renderReports() {
     const query = $('report-search').value.trim().toLowerCase();
-    const reports = reportsCache.filter(report => [report.ticker, report.date, report.title].some(value => String(value || '').toLowerCase().includes(query)));
+    const reports = reportsCache.filter(report => [stockName(report.ticker), report.ticker, report.date, report.title].some(value => String(value || '').toLowerCase().includes(query)));
     const list = $('report-list'); list.replaceChildren();
     $('reports-count').textContent = String(reportsCache.length);
     $('list-empty').hidden = reportsCache.length > 0 || !!query;
     $('reports-status').textContent = reports.length ? (query ? `找到 ${reports.length} 份报告` : '') : reportsCache.length ? '没有匹配的报告。' : query ? '没有匹配的报告。' : '';
+    if (reportNameWarning) $('reports-status').textContent = [$('reports-status').textContent, reportNameWarning].filter(Boolean).join(' ');
     if (!selectedReportId && !$('reader-empty').hidden) {
       $('report-title').textContent = reportsCache.length ? '选择一份报告' : '还没有研究报告';
       $('report-help').textContent = reportsCache.length ? '从左侧报告库选择一份报告，继续你的研究。' : '分析完成后，报告会保存在本机，并出现在左侧的报告库中。';
@@ -496,9 +508,9 @@ function renderReports() {
       const selected = selectedReportId === report.id;
       button.classList.toggle('selected', selected); button.setAttribute('aria-pressed', String(selected));
       const top = document.createElement('span'); top.className = 'report-item-top';
-      const label = document.createElement('strong'); label.textContent = report.ticker || '历史报告';
+      const label = document.createElement('strong'); label.textContent = stockName(report.ticker);
       const icon = document.createElement('span'); icon.className = 'report-item-arrow'; icon.textContent = '↗';
-      const meta = document.createElement('small'); meta.textContent = report.date || report.title;
+      const meta = document.createElement('small'); meta.textContent = [report.ticker, report.date].filter(Boolean).join(' · ') || report.title;
       const detail = document.createElement('span'); detail.className = 'report-item-detail'; detail.textContent = report.title;
         top.append(label, icon); button.append(top, meta, detail); button.addEventListener('click', () => openReport(report)); items.append(button);
       }
@@ -749,8 +761,8 @@ async function openReport(entry) {
   try {
     const report = await window.desktop.readReport(entry.id);
     if (request !== readRequest) return;
-    $('document-title').textContent = entry.ticker ? `${entry.ticker} 研究报告` : report.title;
-    $('report-meta').textContent = [entry.date, '已保存到本机'].filter(Boolean).join('  ·  ');
+    $('document-title').textContent = entry.ticker ? `${stockName(entry.ticker)} 研究报告` : report.title;
+    $('report-meta').textContent = [entry.ticker, entry.date, '已保存到本机'].filter(Boolean).join('  ·  ');
     $('report-meta').title = report.title || '';
     renderMarkdown(report.text);
     $('reader-empty').hidden = true; $('reader-document').hidden = false;
@@ -803,8 +815,8 @@ function renderWatchlist() {
     const row = document.createElement('article'); row.className = 'watch-item';
     const avatar = document.createElement('span'); avatar.className = 'watch-avatar'; avatar.setAttribute('aria-hidden', 'true'); avatar.textContent = item.ticker.slice(0, 2);
     const identity = document.createElement('div'); identity.className = 'watch-identity';
-    const ticker = document.createElement('strong'); ticker.textContent = item.ticker;
-    const name = document.createElement('span'); name.textContent = item.name || '自选标的';
+    const ticker = document.createElement('strong'); ticker.textContent = stockName(item.ticker, item.name);
+    const name = document.createElement('span'); name.textContent = item.ticker;
     identity.append(ticker, name);
     const result = watchResults.get(item.ticker);
     row.dataset.state = result?.status || (result?.reportId ? 'completed' : 'idle');
@@ -965,13 +977,16 @@ $('watch-stop').addEventListener('click', async () => {
 
 const markets = [
   ['美国 · NYSE / Nasdaq', [['苹果','AAPL'],['微软','MSFT'],['英伟达','NVDA'],['标普 500 ETF','SPY']]],
-  ['中国内地 · 上海 / 深圳', [['贵州茅台','600519.SS'],['中国平安','601318.SS'],['平安银行','000001.SZ'],['宁德时代','300750.SZ']]],
+  ['中国内地 · 上海 / 深圳', [['贵州茅台','600519.SS'],['中国平安','601318.SS'],['平安银行','000001.SZ'],['宁德时代','300750.SZ'],['黄河旋风','600172.SS']]],
   ['中国香港 · 港交所', [['腾讯控股','0700.HK'],['阿里巴巴','9988.HK'],['香港交易所','0388.HK']]],
   ['日本 · 东京', [['丰田汽车','7203.T'],['索尼集团','6758.T']]],
   ['韩国 · 首尔', [['三星电子','005930.KS'],['SK 海力士','000660.KS']]],
   ['英国 · 伦敦', [['阿斯利康','AZN.L'],['汇丰控股','HSBA.L']]],
   ['其他资产', [['比特币 / 美元','BTC-USD'],['以太坊 / 美元','ETH-USD']]],
 ];
+const marketNames = new Map(markets.flatMap(([, examples]) => examples.map(([name, ticker]) => [ticker, name])));
+// Legacy reports used this bare code; do not infer exchanges for other numeric symbols.
+marketNames.set('600172', marketNames.get('600172.SS'));
 function renderMarkets() {
 const query = $('market-search').value.trim().toLowerCase();
 const list = $('market-list'); list.replaceChildren();

@@ -150,7 +150,7 @@ const assert = require('node:assert/strict');
     await page.locator('.reader-paper').evaluate(paper => paper.scrollTo({ top: paper.scrollHeight, behavior: 'instant' }));
     assert.ok(await page.locator('.reader-paper').evaluate(paper => paper.scrollTop > 0), 'Long report must exercise its independent scroll container');
     await page.locator('.report-item').nth(1).click();
-    await page.waitForFunction(() => document.querySelector('#document-title').textContent.includes('MSFT') && !document.querySelector('#reader-document').hidden);
+    await page.waitForFunction(() => document.querySelector('#document-title').textContent.includes('微软') && !document.querySelector('#reader-document').hidden);
     assert.equal(await page.locator('.reader-paper').evaluate(paper => paper.scrollTop), 0, 'Opening a different report must show its header and final decision');
     await page.evaluate(() => { window.__ui.longReport = false; });
 
