@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, shell, safeStorage, dialog } = require('electron');
+const { createDesktopUpdater } = require('./desktop-update');
 const { spawn, execFile, execFileSync } = require('node:child_process');
 const { StringDecoder } = require('node:string_decoder');
 const fs = require('node:fs');
@@ -27,6 +28,11 @@ const stateDir = path.join(__dirname, 'local-data', 'analysis');
 const reports = path.join(stateDir, 'logs');
 const updateMarker = path.join(__dirname, 'update-incomplete');
 let running = false;
+let desktopRestartRequired = false;
+const handle = (name, fn) => ipcMain.handle(name, (...args) => {
+  if (desktopRestartRequired) throw new Error('桌面程序已更新，请先重启');
+  return fn(...args);
+});
 const analysisControl = createAnalysisControl();
 const modelCatalogQueue = createLatestQueue(({ provider, baseUrl }) => new Promise((resolve, reject) => {
   const child = execFile(python, [path.join(__dirname, 'model_catalog_bridge.py')], { cwd: repo, env: cleanEnvironment(process.env), windowsHide: true, timeout: 15000, maxBuffer: 1024 * 1024, encoding: 'utf8' }, (error, stdout) => {
@@ -68,12 +74,12 @@ function supervisorPython() {
   return executable;
 }
 
-const hasLock = app.requestSingleInstanceLock();
-if (!hasLock) app.quit();
-else app.whenReady().then(() => {
+app.whenReady().then(() => {
   try { recoverUiUpdate(__dirname); }
   catch (error) { dialog.showErrorBox('界面更新恢复失败', error.message + '\n请保留本地备份并修复安装后再启动。'); app.quit(); return; }
-  const updates = createUpdateService({ desktopDir: __dirname, repo, hostVersion: require('./package.json').version });
+  const updates = createUpdateService({ desktopDir: __dirname, repo, hostVersion: require('./package.json').version, kernelOnly: true });
+  const desktopUpdates = createDesktopUpdater({ desktopDir: __dirname });
+  let desktopUpdateState = { current: require('./package.json').version, latest: '', available: false, status: 'unknown' };
   const profiles = createProfileStore(path.join(__dirname, 'local-data', 'api-profiles.bin'), safeStorage);
   const fred = createDataKeyStore(path.join(__dirname, 'local-data', 'fred-key.bin'), safeStorage);
   const watchlist = createWatchlistStore(path.join(__dirname, 'local-data', 'watchlist.json'));
@@ -125,7 +131,8 @@ else app.whenReady().then(() => {
       return { code, reportId, stopped };
   }
   let batchRunner = null;
-  ipcMain.handle('run', async (_event, input) => {
+  handle('run', async (_event, input) => {
+    if (desktopRestartRequired) throw new Error('桌面程序已更新，请先重启');
     if (running) throw new Error('已有任务正在运行');
     recoverUiUpdate(__dirname);
     if (fs.existsSync(updateMarker)) throw new Error('上次内核更新未完成，请打开“更新”并重试官方内核更新');
@@ -136,7 +143,8 @@ else app.whenReady().then(() => {
     try { return await runOneAnalysis(input, profile, fredKey); }
     finally { running = false; }
   });
-  ipcMain.handle('run-batch', async (_event, input) => {
+  handle('run-batch', async (_event, input) => {
+    if (desktopRestartRequired) throw new Error('桌面程序已更新，请先重启');
     if (running) throw new Error('已有任务正在运行');
     recoverUiUpdate(__dirname);
     if (fs.existsSync(updateMarker)) throw new Error('上次内核更新未完成，请打开“更新”并重试官方内核更新');
@@ -169,41 +177,59 @@ else app.whenReady().then(() => {
     try { return await batchRunner.start(tickers); }
     finally { batchRunner = null; running = false; }
   });
-  ipcMain.handle('stop', () => batchRunner?.isActive() ? batchRunner.stop() : analysisControl.stop());
-  ipcMain.handle('watchlist', () => watchlist.initialize(() => reportStore.list()));
-  ipcMain.handle('watchlist-add', (_event, input) => {
+  handle('stop', () => batchRunner?.isActive() ? batchRunner.stop() : analysisControl.stop());
+  handle('watchlist', () => watchlist.initialize(() => reportStore.list()));
+  handle('watchlist-add', (_event, input) => {
     const item = normalizeWatchItem(input);
     watchlist.initialize(() => reportStore.list());
     return watchlist.add(item);
   });
-  ipcMain.handle('watchlist-remove', (_event, ticker) => {
+  handle('watchlist-remove', (_event, ticker) => {
     const item = normalizeWatchItem({ ticker });
     watchlist.initialize(() => reportStore.list());
     return watchlist.remove(item.ticker);
   });
-  ipcMain.handle('holdings', () => holdings.list());
-  ipcMain.handle('holdings-add', (_event, input) => holdings.add(input));
-  ipcMain.handle('holdings-remove', (_event, ticker) => holdings.remove(ticker));
-  ipcMain.handle('screen-a-shares', () => {
+  handle('holdings', () => holdings.list());
+  handle('holdings-add', (_event, input) => holdings.add(input));
+  handle('holdings-remove', (_event, ticker) => holdings.remove(ticker));
+  handle('screen-a-shares', () => {
     if (!screening) screening = screener.screen().finally(() => { screening = null; });
     return screening;
   });
-  ipcMain.handle('updates-check', (_event, force = false) => {
+  handle('updates-check', async (_event, force = false) => {
     if (typeof force !== 'boolean') throw new Error('检查更新参数无效');
-    return updates.check({ force });
+    const [kernel, desktop] = await Promise.allSettled([updates.check({ force }), desktopUpdates.check()]);
+    if (desktop.status === 'fulfilled') desktopUpdateState = desktop.value;
+    else desktopUpdateState = { ...desktopUpdateState, status: 'error', error: desktop.reason.message };
+    const state = kernel.status === 'fulfilled' ? kernel.value : { checkedAt: Date.now(), kernel: { status: 'error', error: kernel.reason.message } };
+    return { ...state, ui: desktopUpdateState };
   });
-  ipcMain.handle('ui-reload', () => {
+  handle('ui-reload', () => {
+    if (desktopRestartRequired) throw new Error('桌面程序已更新，请先重启');
     if (running || modelCatalogQueue.isBusy()) throw new Error('任务进行中，请完成后重新加载界面');
     recoverUiUpdate(__dirname);
     win.webContents.reload();
   });
-  ipcMain.handle('update', async (_event, target) => {
+  handle('update', async (_event, target) => {
     if (!['kernel', 'ui'].includes(target)) throw new Error('请选择官方内核或界面更新');
+    if (desktopRestartRequired) throw new Error('桌面程序已更新，请先重启');
     if (running) throw new Error('分析或更新正在运行');
     if (modelCatalogQueue.isBusy()) throw new Error('模型目录读取中，请稍后更新');
     running = true;
     try {
-      if (target === 'ui') return await updates.installUi();
+      if (target === 'ui') {
+        let result;
+        try { result = await desktopUpdates.install(); }
+        catch (error) {
+          if (fs.existsSync(path.join(__dirname, 'local-data', 'desktop-update-pending.json'))) desktopRestartRequired = true;
+          throw error;
+        }
+        if (!result.installed) return '桌面程序已是最新版本';
+        desktopRestartRequired = true;
+        try { app.relaunch(); app.exit(0); }
+        catch { throw new Error('桌面程序已更新，但自动重启失败；请关闭后重新启动'); }
+        return `桌面程序已更新至 ${result.version}，正在重新启动`;
+      }
       const env = { ...cleanEnvironment(process.env), GIT_TERMINAL_PROMPT: '0' };
       const gitValue = args => execFileSync('git', args, { cwd: repo, env, encoding: 'utf8', windowsHide: true }).trim();
       if (gitValue(['remote', 'get-url', 'origin']) !== 'https://github.com/TauricResearch/TradingAgents.git' || gitValue(['branch', '--show-current']) !== 'main') {
@@ -218,20 +244,20 @@ else app.whenReady().then(() => {
       return '官方内核更新完成';
     } finally { running = false; }
   });
-  ipcMain.handle('reports', () => { fs.mkdirSync(reports, { recursive: true }); return shell.openPath(reports); });
-  ipcMain.handle('profiles', () => profiles.list());
-  ipcMain.handle('fred-status', () => fred.status());
-  ipcMain.handle('fred-save', (_event, key) => { if (running) throw new Error('任务正在运行，请稍后保存'); return fred.put(key); });
-  ipcMain.handle('fred-delete', () => { if (running) throw new Error('任务正在运行，请稍后操作'); return fred.remove(); });
-  ipcMain.handle('fred-backup-unreadable', () => { if (running) throw new Error('任务正在运行，请稍后操作'); return fred.backupUnreadable(); });
-  ipcMain.handle('model-catalog', (_event, input) => {
+  handle('reports', () => { fs.mkdirSync(reports, { recursive: true }); return shell.openPath(reports); });
+  handle('profiles', () => profiles.list());
+  handle('fred-status', () => fred.status());
+  handle('fred-save', (_event, key) => { if (running) throw new Error('任务正在运行，请稍后保存'); return fred.put(key); });
+  handle('fred-delete', () => { if (running) throw new Error('任务正在运行，请稍后操作'); return fred.remove(); });
+  handle('fred-backup-unreadable', () => { if (running) throw new Error('任务正在运行，请稍后操作'); return fred.backupUnreadable(); });
+  handle('model-catalog', (_event, input) => {
     const provider = String(input?.provider || '').trim().toLowerCase();
     const baseUrl = String(input?.baseUrl || '').trim();
     if (!/^[a-z0-9_-]{1,40}$/.test(provider) || baseUrl.length > 500) throw new Error('服务类型或地址格式不正确');
     if (running) throw new Error('分析或更新进行中，请稍后读取模型目录');
     return modelCatalogQueue.submit({ provider, baseUrl });
   });
-  ipcMain.handle('models-fetch', async (_event, input) => {
+  handle('models-fetch', async (_event, input) => {
     const provider = String(input?.provider || '').trim().toLowerCase();
     const baseUrl = String(input?.baseUrl || '').trim();
     if (!/^[a-z0-9_-]{1,40}$/.test(provider) || baseUrl.length > 500) throw new Error('服务类型或地址格式不正确');
@@ -247,7 +273,7 @@ else app.whenReady().then(() => {
     if (!endpoint) throw new Error('请先填写 API 地址');
     return fetchAvailableModels(endpoint, key);
   });
-  ipcMain.handle('profile-save', async (_event, input) => {
+  handle('profile-save', async (_event, input) => {
     if (running) throw new Error('任务正在运行，请稍后保存');
     const { provider } = validProfile(input);
     running = true;
@@ -256,13 +282,13 @@ else app.whenReady().then(() => {
       return profiles.put(input);
     } finally { running = false; }
   });
-  ipcMain.handle('profile-select', (_event, id) => profiles.select(id));
-  ipcMain.handle('profile-delete', (_event, id) => profiles.delete(id));
-  ipcMain.handle('profile-backup-unreadable', () => {
+  handle('profile-select', (_event, id) => profiles.select(id));
+  handle('profile-delete', (_event, id) => profiles.delete(id));
+  handle('profile-backup-unreadable', () => {
     if (running) throw new Error('任务正在运行，请稍后操作');
     return profiles.backupUnreadable();
   });
-  ipcMain.handle('reports-list', () => reportStore.list());
-  ipcMain.handle('report-read', (_event, id) => reportStore.read(id));
+  handle('reports-list', () => reportStore.list());
+  handle('report-read', (_event, id) => reportStore.read(id));
 });
 app.on('window-all-closed', () => app.quit());

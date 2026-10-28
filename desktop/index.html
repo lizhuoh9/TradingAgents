@@ -99,12 +99,11 @@
 </div>
 <dialog id="updates-dialog" class="updates-dialog" aria-labelledby="updates-heading" aria-describedby="updates-description">
   <header class="updates-heading"><div><p class="updates-eyebrow">保持工作台更新</p><h2 id="updates-heading">更新</h2></div><button id="updates-close" class="icon-button" type="button" aria-label="关闭更新窗口" autofocus><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
-  <p id="updates-description" class="updates-description">内核与界面可以分别更新，由你决定何时安装。</p>
+  <p id="updates-description" class="updates-description">官方内核与桌面程序可以分别更新，由你决定何时安装。依赖或更新引导发生变更时，需要手动完整升级。</p>
   <div class="update-card" data-update-target="kernel"><div class="update-card-heading"><div><h3>官方内核</h3><p>TradingAgents 官方分析引擎与 Python 依赖</p></div><span id="kernel-update-status" class="update-status">未检查</span></div><dl class="update-versions"><div><dt>当前</dt><dd id="kernel-update-current">—</dd></div><div><dt>最新</dt><dd id="kernel-update-latest">—</dd></div></dl><p id="kernel-update-error" class="update-error" hidden></p><div class="update-card-footer"><span>跟随官方主分支</span><button id="update-kernel" class="button button-subtle" type="button">更新内核</button></div></div>
-  <div class="update-card" data-update-target="ui"><div class="update-card-heading"><div><h3>界面</h3><p>我们的工作台布局与交互</p></div><span id="ui-update-status" class="update-status">未检查</span></div><dl class="update-versions"><div><dt>当前</dt><dd id="ui-update-current">—</dd></div><div><dt>最新</dt><dd id="ui-update-latest">—</dd></div></dl><p id="ui-update-error" class="update-error" hidden></p><div class="update-card-footer"><span>需要完整桌面升级时会单独提示</span><button id="update-ui" class="button button-subtle" type="button" disabled>更新界面</button></div></div>
+  <div class="update-card" data-update-target="ui"><div class="update-card-heading"><div><h3>桌面程序</h3><p>工作台界面和桌面主程序</p></div><span id="ui-update-status" class="update-status">未检查</span></div><dl class="update-versions"><div><dt>当前</dt><dd id="ui-update-current">—</dd></div><div><dt>最新</dt><dd id="ui-update-latest">—</dd></div></dl><p id="ui-update-error" class="update-error" hidden></p><div class="update-card-footer"><span>安装后自动重启；本地资料会保留</span><button id="update-ui" class="button button-subtle" type="button" disabled>更新桌面程序</button></div></div>
   <p id="updates-busy" class="updates-note" role="status" hidden></p><p id="updates-message" class="updates-message" role="status" aria-live="polite"></p>
-  <div id="ui-reload-notice" class="ui-reload-notice" hidden><div><strong>新界面已安装</strong><p>重新加载后生效，未保存的表单内容会清空。</p></div><button id="reload-ui" class="button button-primary" type="button">重新加载界面</button></div>
   <footer class="updates-footer"><span id="updates-checked" class="updates-note">尚未检查版本</span><button id="check-updates" class="text-button" type="button">检查更新</button></footer>
-  <p class="updates-privacy">启动时及每 6 小时检查公开版本信息，只提示、不自动安装。版本检查不发送报告、密钥或自选。</p>
+  <p class="updates-privacy">启动时及每 6 小时检查公开版本信息，只提示、不自动安装。版本检查不发送报告、密钥、自选或持仓。</p>
 </dialog>
 <script src="renderer.js"></script></body></html>

@@ -17,7 +17,6 @@ let batchBusy = false;
 let updateState = { checkedAt: null, kernel: { status: 'unknown' }, ui: { status: 'unknown' } };
 let updateCheckPromise = null;
 let updateInstalling = '';
-let uiReloadPending = false;
 let watchlist = [];
 let watchRevision = 0;
 const watchResults = new Map();
@@ -179,7 +178,7 @@ function renderUpdateState() {
   const available = ['kernel', 'ui'].some(target => updateState[target]?.available);
   $('update-dot').hidden = !available;
   $('update').setAttribute('aria-label', available ? '更新（有新版本）' : '更新');
-  $('update').title = available ? '有新版本可更新' : '检查内核与界面更新';
+  $('update').title = available ? '有新版本可更新' : '检查内核与桌面程序更新';
   const busy = operationBusy || batchBusy || !!updateInstalling;
   const labels = { unknown: '未检查', current: '已是最新', available: '有新版本', error: '检查失败', blocked: '暂不能更新' };
   for (const target of ['kernel', 'ui']) {
@@ -192,14 +191,12 @@ function renderUpdateState() {
     const error = $(`${target}-update-error`);
     error.textContent = state.error || '';
     error.hidden = !state.error;
-    $(`update-${target}`).disabled = busy || state.status === 'blocked' || (target === 'ui' && (!state.available || uiReloadPending)) || typeof window.desktop.update !== 'function';
+    $(`update-${target}`).disabled = busy || state.status === 'blocked' || (target === 'ui' && !state.available) || typeof window.desktop.update !== 'function';
   }
   $('check-updates').disabled = !!updateCheckPromise || !!updateInstalling || typeof window.desktop.checkUpdates !== 'function';
   $('check-updates').textContent = updateCheckPromise ? '正在检查…' : '检查更新';
   $('updates-busy').hidden = !busy;
-  $('updates-busy').textContent = updateInstalling ? `正在更新${updateInstalling === 'kernel' ? '官方内核' : '界面'}，详细进度可在运行日志中查看。` : '任务运行中，结束后可安装更新。';
-  $('ui-reload-notice').hidden = !uiReloadPending;
-  $('reload-ui').disabled = busy || typeof window.desktop.reloadUi !== 'function';
+  $('updates-busy').textContent = updateInstalling ? `正在更新${updateInstalling === 'kernel' ? '官方内核' : '桌面程序'}，请勿关闭软件。` : '任务运行中，结束后可安装更新。';
   const checkedAt = updateState.checkedAt ? new Date(updateState.checkedAt) : null;
   $('updates-checked').textContent = checkedAt && !Number.isNaN(checkedAt.valueOf()) ? `上次检查 ${checkedAt.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}` : '尚未检查版本';
 }
@@ -238,11 +235,10 @@ async function installUpdate(target) {
       installed = true;
       return message;
     } catch (error) { $('updates-message').textContent = '更新未完成：' + error.message; throw error; }
-  }, `正在更新${target === 'kernel' ? '官方内核' : '界面'}…`);
+  }, `正在更新${target === 'kernel' ? '官方内核' : '桌面程序'}…`);
   updateInstalling = '';
   if (installed) {
-    if (target === 'ui') uiReloadPending = true;
-    $('updates-message').textContent = target === 'ui' ? '界面更新已安装，重新加载后生效。' : '官方内核更新完成。';
+    $('updates-message').textContent = target === 'ui' ? '桌面程序已是最新版本或正在重新启动。' : '官方内核更新完成。';
     if (updateCheckPromise) await updateCheckPromise;
     await checkUpdates(true);
   }
@@ -250,13 +246,6 @@ async function installUpdate(target) {
 }
 $('update-kernel').addEventListener('click', () => installUpdate('kernel'));
 $('update-ui').addEventListener('click', () => installUpdate('ui'));
-$('reload-ui').addEventListener('click', async () => {
-  if (operationBusy || batchBusy || updateInstalling || !uiReloadPending) return;
-  $('reload-ui').disabled = true;
-  try { await window.desktop.reloadUi(); }
-  catch (error) { $('updates-message').textContent = '重新加载失败：' + error.message; }
-  finally { renderUpdateState(); }
-});
 if (window.desktop.onUpdatesChanged) window.desktop.onUpdatesChanged(state => { updateState = state; renderUpdateState(); });
 if (window.desktop.checkUpdates) {
   checkUpdates();

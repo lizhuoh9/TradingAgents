@@ -93,7 +93,7 @@ function recoverUiUpdate(desktopDir, io = fs) {
   return true;
 }
 
-function createUpdateService({ desktopDir, repo, hostVersion, fetchImpl = globalThis.fetch, git, now = Date.now, io = fs }) {
+function createUpdateService({ desktopDir, repo, hostVersion, fetchImpl = globalThis.fetch, git, now = Date.now, io = fs, kernelOnly = false }) {
   if (!validVersion(hostVersion)) throw new Error('桌面主程序版本无效');
   const runGit = git || (args => new Promise((resolve, reject) => {
     execFile('git', args, { cwd: repo, env: { ...cleanEnvironment(process.env), GIT_TERMINAL_PROMPT: '0' }, windowsHide: true, timeout: 10000, maxBuffer: 128 * 1024, encoding: 'utf8' },
@@ -176,8 +176,9 @@ function createUpdateService({ desktopDir, repo, hostVersion, fetchImpl = global
     if (pending) return pending;
     if (!force && state.checkedAt !== null && now() - state.checkedAt < TTL) return snapshot();
     pending = (async () => {
-      const results = await Promise.allSettled([inspectKernel(), inspectUi()]);
-      for (const [index, name] of ['kernel', 'ui'].entries()) {
+      const names = kernelOnly ? ['kernel'] : ['kernel', 'ui'];
+      const results = await Promise.allSettled(kernelOnly ? [inspectKernel()] : [inspectKernel(), inspectUi()]);
+      for (const [index, name] of names.entries()) {
         const item = results[index];
         state[name] = item.status === 'fulfilled' ? (name === 'ui' ? item.value.result : item.value) : { ...state[name], status: 'error', error: item.reason.message };
       }
