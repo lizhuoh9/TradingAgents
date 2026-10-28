@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, safeStorage, dialog } = require('electron');
 const { spawn, execFile, execFileSync } = require('node:child_process');
 const { StringDecoder } = require('node:string_decoder');
 const fs = require('node:fs');
@@ -17,6 +17,7 @@ const { credentialForRequest, fetchAvailableModels } = require('./model-service'
 const { createWatchlistStore, normalizeWatchItem, MAX_WATCHLIST } = require('./watchlist-store');
 const { createBatchRunner } = require('./batch-runner');
 const { createAShareScreener } = require('./a-share-screener');
+const { createUpdateService, recoverUiUpdate } = require('./update-service');
 
 const { officialRepoPath } = require('./repo-path');
 const repo = officialRepoPath(__dirname);
@@ -69,6 +70,9 @@ function supervisorPython() {
 const hasLock = app.requestSingleInstanceLock();
 if (!hasLock) app.quit();
 else app.whenReady().then(() => {
+  try { recoverUiUpdate(__dirname); }
+  catch (error) { dialog.showErrorBox('界面更新恢复失败', error.message + '\n请保留本地备份并修复安装后再启动。'); app.quit(); return; }
+  const updates = createUpdateService({ desktopDir: __dirname, repo, hostVersion: require('./package.json').version });
   const profiles = createProfileStore(path.join(__dirname, 'local-data', 'api-profiles.bin'), safeStorage);
   const fred = createDataKeyStore(path.join(__dirname, 'local-data', 'fred-key.bin'), safeStorage);
   const watchlist = createWatchlistStore(path.join(__dirname, 'local-data', 'watchlist.json'));
@@ -121,7 +125,8 @@ else app.whenReady().then(() => {
   let batchRunner = null;
   ipcMain.handle('run', async (_event, input) => {
     if (running) throw new Error('已有任务正在运行');
-    if (fs.existsSync(updateMarker)) throw new Error('上次更新未完成，请先重新点击更新官方项目');
+    recoverUiUpdate(__dirname);
+    if (fs.existsSync(updateMarker)) throw new Error('上次内核更新未完成，请打开“更新”并重试官方内核更新');
     validate(input);
     const profile = profiles.get(input.profileId);
     const fredKey = fred.get();
@@ -131,7 +136,8 @@ else app.whenReady().then(() => {
   });
   ipcMain.handle('run-batch', async (_event, input) => {
     if (running) throw new Error('已有任务正在运行');
-    if (fs.existsSync(updateMarker)) throw new Error('上次更新未完成，请先重新点击更新官方项目');
+    recoverUiUpdate(__dirname);
+    if (fs.existsSync(updateMarker)) throw new Error('上次内核更新未完成，请打开“更新”并重试官方内核更新');
     if (!input || !Array.isArray(input.tickers) || !input.tickers.length || input.tickers.length > MAX_WATCHLIST) throw new Error('请选择需要分析的自选股票');
     const tickers = input.tickers.map(ticker => normalizeWatchItem({ ticker }).ticker);
     if (new Set(tickers).size !== tickers.length) throw new Error('批量列表中包含重复股票');
@@ -177,12 +183,23 @@ else app.whenReady().then(() => {
     if (!screening) screening = screener.screen().finally(() => { screening = null; });
     return screening;
   });
-  ipcMain.handle('update', async () => {
+  ipcMain.handle('updates-check', (_event, force = false) => {
+    if (typeof force !== 'boolean') throw new Error('检查更新参数无效');
+    return updates.check({ force });
+  });
+  ipcMain.handle('ui-reload', () => {
+    if (running || modelCatalogQueue.isBusy()) throw new Error('任务进行中，请完成后重新加载界面');
+    recoverUiUpdate(__dirname);
+    win.webContents.reload();
+  });
+  ipcMain.handle('update', async (_event, target) => {
+    if (!['kernel', 'ui'].includes(target)) throw new Error('请选择官方内核或界面更新');
     if (running) throw new Error('分析或更新正在运行');
     if (modelCatalogQueue.isBusy()) throw new Error('模型目录读取中，请稍后更新');
     running = true;
     try {
-      const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', PYTHONUTF8: '1' };
+      if (target === 'ui') return await updates.installUi();
+      const env = { ...cleanEnvironment(process.env), GIT_TERMINAL_PROMPT: '0' };
       const gitValue = args => execFileSync('git', args, { cwd: repo, env, encoding: 'utf8', windowsHide: true }).trim();
       if (gitValue(['remote', 'get-url', 'origin']) !== 'https://github.com/TauricResearch/TradingAgents.git' || gitValue(['branch', '--show-current']) !== 'main') {
         throw new Error('官方仓库地址或当前分支已改变，已停止更新');
@@ -193,7 +210,7 @@ else app.whenReady().then(() => {
       if (await command(win, 'git', ['pull', '--ff-only', 'origin', 'main'], env) !== 0) throw new Error('更新源码失败，请查看日志并重试');
       if (await command(win, python, ['-m', 'pip', 'install', '-e', '.'], env) !== 0) throw new Error('源码已更新，但依赖安装失败；请检查网络并重新点击更新，成功前不要运行分析');
       fs.unlinkSync(updateMarker);
-      return '更新完成';
+      return '官方内核更新完成';
     } finally { running = false; }
   });
   ipcMain.handle('reports', () => { fs.mkdirSync(reports, { recursive: true }); return shell.openPath(reports); });

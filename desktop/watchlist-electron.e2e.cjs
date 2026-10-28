@@ -11,6 +11,8 @@ const assert = require('node:assert/strict');
   const desktop = path.join(root, 'TradingAgents-Desktop');
   const repo = path.join(root, 'TradingAgents');
   fs.mkdirSync(desktop); fs.mkdirSync(repo);
+  // Keep this unrelated connection/batch fixture offline; update transport has its own tests.
+  fs.writeFileSync(path.join(desktop, 'update-service.js'), `module.exports = { recoverUiUpdate() {}, createUpdateService: () => ({ check: async () => ({ checkedAt: null, kernel: { status: 'unknown' }, ui: { status: 'unknown' } }) }) };`);
   for (const name of ['package.json', 'main.js', 'preload.js', 'analysis-control.js', 'batch-runner.js', 'watchlist-store.js', 'a-share-screener.js', 'memory_transaction.py', 'model_catalog_bridge.py', 'model-service.js', 'latest-queue.js', 'profile-store.js', 'data-key-store.js', 'fred_guard.py', 'report-store.js', 'environment.js', 'validate.js', 'mask.js', 'strip-control.js', 'index.html', 'style.css', 'renderer.js', 'vendor', 'assets']) {
     fs.cpSync(path.join(__dirname, name), path.join(desktop, name), { recursive: true });
   }
@@ -57,7 +59,7 @@ else:
     for (const ticker of ['AAPL', 'MSFT', 'GOOG']) {
       await page.fill('#watch-ticker', ticker);
       await page.click('#watch-add-form button');
-      await page.waitForFunction(value => Array.from(document.querySelectorAll('.watch-item strong')).some(item => item.textContent === value), ticker);
+      await page.waitForFunction(value => Array.from(document.querySelectorAll('.watch-identity span')).some(item => item.textContent === value), ticker);
     }
     await page.evaluate(() => { window.__batchEvents = []; window.desktop.onBatchProgress(event => window.__batchEvents.push(event)); });
     await page.click('#watch-run');

@@ -33,7 +33,7 @@ API 设置中的“可选数据服务”支持保存用户自行申请的 FRED �
 
 若连接文件无法解密，先确认使用了保存时的 Windows 登录账户。设置页可由用户主动选择“备份原配置并重新配置”：程序会保留原始加密文件的本地备份，新连接需要重新填写密钥；不会自动删除或替换旧文件。
 
-“更新官方项目”只更新独立的官方 Python 源码及依赖，不会更新桌面端代码。它会检查源码的 origin 和 main 分支，然后执行 fast-forward 更新与 Python 依赖安装。检测到已跟踪文件修改时会停止。更新过程中出现错误或中断后，分析会被暂时禁用，请检查日志和网络后再次点击更新。更新并非原子回滚，官方后续版本若修改命令行接口，桌面程序可能需要跟着调整。桌面端更新需在桌面代码仓库单独拉取并按需运行 `npm ci`。
+顶栏“更新”分别提供“官方内核”和“界面”两项操作。启动及每 6 小时检查公开版本，有新版本会显示提示点；也可以主动点击“检查更新”。检查只请求 GitHub 的公开代码版本信息，不发送 API 密钥、报告或自选，不自动安装。网络失败会显示检查错误并保留上次发现的更新提示。
 
 报告和运行日志按 `desktop/local-data/analysis/logs/<分析日期>/<代码>/run-<运行时间>-<标识>/` 保存；每次运行都有独立目录。缓存、CLI 偏好和决策历史也保存在 `desktop/local-data/analysis/`，该目录由桌面项目的 `.gitignore` 排除。旧版本位于独立官方仓库的 `local-data/` 的资料不会自动迁移；如需迁移，请先备份，再手动复制到新目录。可在“报告阅读”页查看已保存报告，或打开文件夹查看原始文件。
 
@@ -58,3 +58,13 @@ CLI 偏好位置通过当前官方版本的内部接口指定；若上游更新�
 界面布局参考 [open-claude-ui](https://github.com/Caho1/open-claude-ui) 的本地设计令牌、[Linear 的界面层级说明](https://linear.app/now/behind-the-latest-design-refresh)和 [Notion 的侧栏组织方式](https://www.notion.com/help/navigate-with-the-sidebar)。没有新增在线字体、远程界面资源或遥测。`workspace-ui.e2e.cjs` 使用独立模拟数据检查五个页面的响应布局、侧栏、日志跟随和报告切换，截图默认写入忽略提交的 `local-data/ui-review/`；需本机 Playwright 和 Chromium，通过 `NODE_PATH` 与 `READER_BROWSER_EXECUTABLE` 指定现有运行环境。
 
 报告库和自选优先显示公司或资产名称，代码作为辅助信息保留；报告搜索支持公司名、代码与日期。名称只读取内置市场目录和本机已保存的自选名称，未识别时保留原代码，不在浏览时请求外部服务。历史报告的裸代码 `600172` 按[上交所证券资料](https://www.sse.com.cn/assortment/stock/list/info/announcement/index.shtml?productId=600172)显示为黄河旋风；其他未注明市场的数字代码不会推测交易所。名称仅用于界面展示，不修改报告正文、文件路径或发给分析引擎的代码。
+
+官方内核跟随 TauricResearch/TradingAgents 的 main 分支，安装前检查 origin、分支和本地修改，再执行 fast-forward 更新与 Python 依赖安装。更新失败或中断会保留未完成标记，阻止继续分析并提示重试；源码与依赖安装不是原子回滚。界面通道来自 lizhuoh9/TradingAgents 的独立发行清单，只替换 index.html、renderer.js 和 style.css；它不修改主程序、Python 桥接、依赖或用户资料。如果新版需要不同的主程序版本，会提示完整桌面升级。分析运行中可查看版本，但不能安装或重新加载。
+
+界面安装会固定到同一 Git 提交、逐文件验证 SHA256、检查本地修改，并将原文件保留到 local-data/ui-update-backups/。出现替换错误会回滚；若进程中断，下次启动先恢复，恢复失败会停止启动以保留证据。安装成功后由用户点击“重新加载界面”生效，未保存表单会清空。本地源码改动不会被自动覆盖。
+
+### 发布界面更新（维护者）
+
+完成前端修改并通过测试后，在 desktop 目录执行 `node ui-release.cjs 0.2.1`（替换成递增的新版本），将生成的 ui-release.json 和三份前端文件一起提交到 main，即发布一版界面更新。运行 `node ui-release.cjs --check` 核对清单。生成工具与 .gitattributes 保持 LF 换行，避免 Windows 检出与下载的字节校验不一致。不要仅修改文件而不递增界面版本；需要新的主进程 IPC 或依赖时，应升级 package.json 的主程序版本并发布完整安装，不能通过前端通道替换后端。
+
+更新测试：`npm test` 覆盖两个安装入口、任务互斥、失败恢复及来源校验；`node updates-ui.e2e.cjs` 使用模拟版本检查提示点、分别安装、失败状态和手动重新加载，不访问模型或用户资料。

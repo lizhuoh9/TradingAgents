@@ -14,6 +14,10 @@ let latestReportId = null;
 let analysisBusy = false;
 let operationBusy = false;
 let batchBusy = false;
+let updateState = { checkedAt: null, kernel: { status: 'unknown' }, ui: { status: 'unknown' } };
+let updateCheckPromise = null;
+let updateInstalling = '';
+let uiReloadPending = false;
 let watchlist = [];
 let watchRevision = 0;
 const watchResults = new Map();
@@ -106,7 +110,8 @@ async function task(fn, message, canStop = false) {
   let errorMessage = '请查看日志了解原因，已保存的文件不会被删除。';
   $('home-error').hidden = true;
   analysisBusy = canStop;
-  $('run').disabled = $('update').disabled = true;
+  $('run').disabled = true;
+  renderUpdateState();
   renderWatchlist();
   $('open-latest').hidden = true;
   latestReportId = null;
@@ -135,7 +140,8 @@ async function task(fn, message, canStop = false) {
   } finally {
     analysisBusy = false;
     operationBusy = false;
-    $('run').disabled = $('update').disabled = false;
+    $('run').disabled = false;
+    renderUpdateState();
     $('stop-run').hidden = true;
     $('stop-run').disabled = false;
     document.querySelector('.status-pill').dataset.state = finalState;
@@ -169,7 +175,93 @@ $('analysis-form').addEventListener('submit', event => {
   }, '分析中…', true);
 });
 $('ticker').addEventListener('input', () => { $('ticker-hint').textContent = '例如 NVDA、600172.SS、000001.SZ、0700.HK'; });
-$('update').addEventListener('click', () => { showPage('analysis'); task(() => window.desktop.update(), '更新中…'); });
+function renderUpdateState() {
+  const available = ['kernel', 'ui'].some(target => updateState[target]?.available);
+  $('update-dot').hidden = !available;
+  $('update').setAttribute('aria-label', available ? '更新（有新版本）' : '更新');
+  $('update').title = available ? '有新版本可更新' : '检查内核与界面更新';
+  const busy = operationBusy || batchBusy || !!updateInstalling;
+  const labels = { unknown: '未检查', current: '已是最新', available: '有新版本', error: '检查失败', blocked: '暂不能更新' };
+  for (const target of ['kernel', 'ui']) {
+    const state = updateState[target] || { status: 'unknown' };
+    $(`${target}-update-current`).textContent = state.current || '—';
+    $(`${target}-update-latest`).textContent = state.latest || '—';
+    const status = $(`${target}-update-status`);
+    status.textContent = updateInstalling === target ? '正在安装…' : labels[state.status] || '未检查';
+    status.dataset.state = state.status;
+    const error = $(`${target}-update-error`);
+    error.textContent = state.error || '';
+    error.hidden = !state.error;
+    $(`update-${target}`).disabled = busy || state.status === 'blocked' || (target === 'ui' && (!state.available || uiReloadPending)) || typeof window.desktop.update !== 'function';
+  }
+  $('check-updates').disabled = !!updateCheckPromise || !!updateInstalling || typeof window.desktop.checkUpdates !== 'function';
+  $('check-updates').textContent = updateCheckPromise ? '正在检查…' : '检查更新';
+  $('updates-busy').hidden = !busy;
+  $('updates-busy').textContent = updateInstalling ? `正在更新${updateInstalling === 'kernel' ? '官方内核' : '界面'}，详细进度可在运行日志中查看。` : '任务运行中，结束后可安装更新。';
+  $('ui-reload-notice').hidden = !uiReloadPending;
+  $('reload-ui').disabled = busy || typeof window.desktop.reloadUi !== 'function';
+  const checkedAt = updateState.checkedAt ? new Date(updateState.checkedAt) : null;
+  $('updates-checked').textContent = checkedAt && !Number.isNaN(checkedAt.valueOf()) ? `上次检查 ${checkedAt.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}` : '尚未检查版本';
+}
+function checkUpdates(force = false) {
+  if (updateCheckPromise) return updateCheckPromise;
+  if (typeof window.desktop.checkUpdates !== 'function') {
+    $('updates-message').textContent = '版本检查暂不可用，请重启桌面程序。';
+    renderUpdateState();
+    return Promise.resolve();
+  }
+  updateCheckPromise = Promise.resolve().then(() => window.desktop.checkUpdates(force)).then(state => {
+    updateState = state;
+  }).catch(error => {
+    for (const target of ['kernel', 'ui']) updateState[target] = { ...updateState[target], status: 'error', error: error.message || '无法检查版本，请稍后重试。' };
+  }).finally(() => { updateCheckPromise = null; renderUpdateState(); });
+  renderUpdateState();
+  return updateCheckPromise;
+}
+$('update').addEventListener('click', () => {
+  renderUpdateState();
+  if (!$('updates-dialog').open) $('updates-dialog').showModal();
+  checkUpdates();
+});
+$('updates-close').addEventListener('click', () => $('updates-dialog').close());
+$('updates-dialog').addEventListener('close', () => $('update').focus());
+$('check-updates').addEventListener('click', () => checkUpdates(true));
+async function installUpdate(target) {
+  if (operationBusy || batchBusy || updateInstalling || $(`update-${target}`).disabled) return;
+  updateInstalling = target;
+  $('updates-message').textContent = '';
+  let installed = false;
+  showPage('analysis');
+  await task(async () => {
+    try {
+      const message = await window.desktop.update(target);
+      installed = true;
+      return message;
+    } catch (error) { $('updates-message').textContent = '更新未完成：' + error.message; throw error; }
+  }, `正在更新${target === 'kernel' ? '官方内核' : '界面'}…`);
+  updateInstalling = '';
+  if (installed) {
+    if (target === 'ui') uiReloadPending = true;
+    $('updates-message').textContent = target === 'ui' ? '界面更新已安装，重新加载后生效。' : '官方内核更新完成。';
+    if (updateCheckPromise) await updateCheckPromise;
+    await checkUpdates(true);
+  }
+  renderUpdateState();
+}
+$('update-kernel').addEventListener('click', () => installUpdate('kernel'));
+$('update-ui').addEventListener('click', () => installUpdate('ui'));
+$('reload-ui').addEventListener('click', async () => {
+  if (operationBusy || batchBusy || updateInstalling || !uiReloadPending) return;
+  $('reload-ui').disabled = true;
+  try { await window.desktop.reloadUi(); }
+  catch (error) { $('updates-message').textContent = '重新加载失败：' + error.message; }
+  finally { renderUpdateState(); }
+});
+if (window.desktop.onUpdatesChanged) window.desktop.onUpdatesChanged(state => { updateState = state; renderUpdateState(); });
+if (window.desktop.checkUpdates) {
+  checkUpdates();
+  setInterval(() => { if (!updateInstalling) checkUpdates(); }, 6 * 60 * 60 * 1000);
+}
 $('stop-run').addEventListener('click', async () => {
   $('stop-run').disabled = true;
   try {
@@ -945,7 +1037,8 @@ $('watch-run').addEventListener('click', async () => {
   const date = $('watch-date').value; const profileId = $('watch-profile').value;
   if (!date || !profileId) { $('watch-message').textContent = '请选择分析日期和模型连接。'; return; }
   batchBusy = analysisBusy = operationBusy = true;
-  $('run').disabled = $('update').disabled = true;
+  $('run').disabled = true;
+  renderUpdateState();
   $('stop-run').hidden = false; $('stop-run').disabled = false;
   $('open-latest').hidden = true; $('log').textContent = '';
   lastLogScrollTop = 0;
@@ -967,7 +1060,8 @@ $('watch-run').addEventListener('click', async () => {
     for (const ticker of tickers) if (watchResults.get(ticker)?.status === 'waiting') watchResults.set(ticker, { ...watchResults.get(ticker), status: 'failed', label: '未开始', detail: '批次启动失败' });
   } finally {
     batchBusy = analysisBusy = operationBusy = false;
-    $('run').disabled = $('update').disabled = false;
+    $('run').disabled = false;
+    renderUpdateState();
     $('stop-run').hidden = true; $('watch-stop').disabled = false; renderWatchlist();
   }
 });
