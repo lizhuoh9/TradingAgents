@@ -52,3 +52,7 @@ CLI 偏好位置通过当前官方版本的内部接口指定；若上游更新�
 界面使用 [open-claude-ui](https://github.com/Caho1/open-claude-ui) 的 `cds-theme.css` 和 `cds-pure.css`（参考版本 `c1f923a`）；许可见 [vendor/LICENSE-open-claude-ui](vendor/LICENSE-open-claude-ui)。
 
 图标来自官方 TradingAgents 仓库的 `tradingagents/assets/tauric-logo.svg`；`assets/` 中保留原始 SVG 和裁切视口后的图标。
+
+桌面界面采用紧凑侧栏和统一工作区布局。顶栏按钮可收起侧栏；运行日志支持“自动换行”和“跟随最新”，向上滚动会暂停跟随，点击按钮可恢复。宽屏下日期报告目录与正文独立滚动，切换报告会回到顶部的最终建议；较窄窗口自动改为上下布局。市场页优先展示 A 股候选筛选，下方提供代码速查；API 设置按连接信息和分析模型分组。
+
+界面布局参考 [open-claude-ui](https://github.com/Caho1/open-claude-ui) 的本地设计令牌、[Linear 的界面层级说明](https://linear.app/now/behind-the-latest-design-refresh)和 [Notion 的侧栏组织方式](https://www.notion.com/help/navigate-with-the-sidebar)。没有新增在线字体、远程界面资源或遥测。`workspace-ui.e2e.cjs` 使用独立模拟数据检查五个页面的响应布局、侧栏、日志跟随和报告切换，截图默认写入忽略提交的 `local-data/ui-review/`；需本机 Playwright 和 Chromium，通过 `NODE_PATH` 与 `READER_BROWSER_EXECUTABLE` 指定现有运行环境。

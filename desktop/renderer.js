@@ -37,17 +37,50 @@ function showPage(name) {
   });
   $('page-title').textContent = pageNames[name];
   window.scrollTo(0, 0);
+  if (name === 'analysis' && followLog) {
+    $('log').scrollTop = $('log').scrollHeight;
+    lastLogScrollTop = $('log').scrollTop;
+  }
   if (name === 'reader') loadReports();
   if (name === 'watchlist') { refreshWatchlist(); syncWatchProfiles(); }
 }
 document.querySelectorAll('[data-page]').forEach(button => button.addEventListener('click', () => showPage(button.dataset.page)));
 
+$('sidebar-toggle').addEventListener('click', () => {
+  const collapsed = document.querySelector('.app-shell').classList.toggle('sidebar-collapsed');
+  $('sidebar-toggle').setAttribute('aria-expanded', String(!collapsed));
+  $('sidebar-toggle').setAttribute('aria-label', collapsed ? '展开侧栏' : '收起侧栏');
+  $('sidebar-toggle').title = collapsed ? '展开侧栏' : '收起侧栏';
+});
+
+let followLog = true;
+let lastLogScrollTop = 0;
+function setLogFollow(enabled) {
+  followLog = enabled;
+  $('log-follow').setAttribute('aria-pressed', String(enabled));
+  $('log-follow').title = enabled ? '自动滚动到最新日志' : '已暂停跟随，点击查看最新日志';
+  if (enabled) $('log').scrollTop = $('log').scrollHeight;
+  lastLogScrollTop = $('log').scrollTop;
+}
+$('log-follow').addEventListener('click', () => setLogFollow(!followLog));
+$('log-wrap').addEventListener('click', () => {
+  const nowrap = $('log').classList.toggle('log-nowrap');
+  $('log-wrap').setAttribute('aria-pressed', String(!nowrap));
+  if (followLog) $('log').scrollTop = $('log').scrollHeight;
+  lastLogScrollTop = $('log').scrollTop;
+});
+$('log').addEventListener('scroll', () => {
+  const log = $('log');
+  if (log.offsetParent && log.scrollTop < lastLogScrollTop && log.scrollHeight - log.scrollTop - log.clientHeight > 48) setLogFollow(false);
+  lastLogScrollTop = log.scrollTop;
+});
+
 $('date').value = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 window.desktop.onLog(text => {
   const log = $('log');
-  const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
   log.textContent = (log.textContent + text).slice(-500000);
-  if (nearBottom) log.scrollTop = log.scrollHeight;
+  if (followLog) log.scrollTop = log.scrollHeight;
+  lastLogScrollTop = log.scrollTop;
 });
 window.desktop.onStopError(message => {
   if (!analysisBusy) return;
@@ -76,6 +109,7 @@ async function task(fn, message, canStop = false) {
   $('open-latest').hidden = true;
   latestReportId = null;
   $('log').textContent = '';
+  lastLogScrollTop = 0;
   $('status').textContent = message;
   $('stop-run').hidden = !canStop;
   $('stop-run').disabled = false;
@@ -716,9 +750,11 @@ async function openReport(entry) {
     const report = await window.desktop.readReport(entry.id);
     if (request !== readRequest) return;
     $('document-title').textContent = entry.ticker ? `${entry.ticker} 研究报告` : report.title;
-    $('report-meta').textContent = [entry.date, report.title].filter(Boolean).join('  ·  ');
+    $('report-meta').textContent = [entry.date, '已保存到本机'].filter(Boolean).join('  ·  ');
+    $('report-meta').title = report.title || '';
     renderMarkdown(report.text);
     $('reader-empty').hidden = true; $('reader-document').hidden = false;
+    document.querySelector('.reader-paper').scrollTo({ top: 0, behavior: 'instant' });
   } catch (error) { if (request === readRequest) { $('report-title').textContent = '无法读取报告'; $('report-help').textContent = error.message; } }
 }
 $('report-search').addEventListener('input', renderReports);
@@ -765,11 +801,13 @@ function renderWatchlist() {
   $('watch-stop').hidden = !batchBusy;
   for (const item of watchlist) {
     const row = document.createElement('article'); row.className = 'watch-item';
+    const avatar = document.createElement('span'); avatar.className = 'watch-avatar'; avatar.setAttribute('aria-hidden', 'true'); avatar.textContent = item.ticker.slice(0, 2);
     const identity = document.createElement('div'); identity.className = 'watch-identity';
     const ticker = document.createElement('strong'); ticker.textContent = item.ticker;
     const name = document.createElement('span'); name.textContent = item.name || '自选标的';
     identity.append(ticker, name);
     const result = watchResults.get(item.ticker);
+    row.dataset.state = result?.status || (result?.reportId ? 'completed' : 'idle');
     const info = document.createElement('div'); info.className = 'watch-result';
     const status = document.createElement('strong'); status.textContent = result?.label || '尚无分析';
     const meta = document.createElement('span'); meta.textContent = result?.detail || '添加后可逐只分析';
@@ -781,7 +819,7 @@ function renderWatchlist() {
     }
     const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'text-button'; remove.textContent = '移除'; remove.disabled = batchBusy;
     remove.setAttribute('aria-label', `移除 ${item.ticker}`); remove.addEventListener('click', () => removeWatchlist(item.ticker)); actions.append(remove);
-    row.append(identity, info, actions); list.append(row);
+    row.append(avatar, identity, info, actions); list.append(row);
   }
 }
 
@@ -818,7 +856,7 @@ async function loadWatchReports(revision) {
           if (!current.reportId) { current.reportId = entry.id; current.previousReport = true; renderWatchlist(); }
           continue;
         }
-        watchResults.set(item.ticker, { label: renderMarkdown(report.text, true), detail: entry.date || '已保存报告', reportId: entry.id });
+        watchResults.set(item.ticker, { status: 'completed', label: renderMarkdown(report.text, true), detail: entry.date || '已保存报告', reportId: entry.id });
         renderWatchlist();
       } catch { /* The report may have disappeared since the list was read. */ }
     }
@@ -865,7 +903,7 @@ async function updateWatchProgress(event) {
   if (!event || !labels[event.status]) return;
   const detail = event.error || (event.code != null && event.code !== 0 ? `退出码 ${event.code}` : '');
   const previousReportId = watchResults.get(event.ticker)?.reportId || null;
-  const item = { label: labels[event.status], detail, reportId: event.reportId || previousReportId, previousReport: !event.reportId && Boolean(previousReportId) };
+  const item = { status: event.status, label: labels[event.status], detail, reportId: event.reportId || previousReportId, previousReport: !event.reportId && Boolean(previousReportId) };
   watchResults.set(event.ticker, item); renderWatchlist();
   if (event.status === 'completed' && event.reportId && window.desktop.readReport) {
     try {
@@ -896,10 +934,11 @@ $('watch-run').addEventListener('click', async () => {
   $('run').disabled = $('update').disabled = true;
   $('stop-run').hidden = false; $('stop-run').disabled = false;
   $('open-latest').hidden = true; $('log').textContent = '';
+  lastLogScrollTop = 0;
   $('status').textContent = '批量分析中…'; document.querySelector('.status-pill').dataset.state = 'busy';
   for (const ticker of tickers) {
     const previousReportId = watchResults.get(ticker)?.reportId || null;
-    watchResults.set(ticker, { label: '等待分析', detail: '', reportId: previousReportId, previousReport: Boolean(previousReportId) });
+    watchResults.set(ticker, { status: 'waiting', label: '等待分析', detail: '', reportId: previousReportId, previousReport: Boolean(previousReportId) });
   }
   $('watch-message').textContent = `正在逐只分析 ${tickers.length} 个标的。`; renderWatchlist();
   try {
@@ -911,7 +950,7 @@ $('watch-run').addEventListener('click', async () => {
   } catch (error) {
     $('watch-message').textContent = '批量分析失败：' + error.message;
     $('status').textContent = '批量分析失败'; document.querySelector('.status-pill').dataset.state = 'error';
-    for (const ticker of tickers) if (watchResults.get(ticker)?.label === '等待分析') watchResults.set(ticker, { ...watchResults.get(ticker), label: '未开始', detail: '批次启动失败' });
+    for (const ticker of tickers) if (watchResults.get(ticker)?.status === 'waiting') watchResults.set(ticker, { ...watchResults.get(ticker), status: 'failed', label: '未开始', detail: '批次启动失败' });
   } finally {
     batchBusy = analysisBusy = operationBusy = false;
     $('run').disabled = $('update').disabled = false;
