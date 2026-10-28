@@ -1,0 +1,82 @@
+// Local mock-only UI test; no model, market or credentials are sent anywhere.
+const { chromium } = require('playwright');
+const { pathToFileURL } = require('node:url');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+
+(async () => {
+  const browser = await chromium.launch({ headless: true, ...(process.env.READER_BROWSER_EXECUTABLE ? { executablePath: process.env.READER_BROWSER_EXECUTABLE } : {}) });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1050, height: 800 } });
+    const external = [];
+    page.on('request', request => { if (/^https?:/i.test(request.url())) external.push(request.url()); });
+    await page.addInitScript(() => {
+      let items = []; window.__screenCalls = 0; window.__batchArgs = null; window.__singleReport = false; window.__singleFailure = false;
+      window.desktop = {
+        onLog() {}, onStopError() {}, profiles: async () => ({ profiles: [{ id: 'profile', name: 'Mock', model: 'test' }], selectedId: 'profile' }),
+        watchlist: async () => items,
+        watchlistAdd: async item => { const ticker = item.ticker.toUpperCase(); if (!items.some(row => row.ticker === ticker)) items = [...items, { ticker, name: item.name || '' }]; return items; },
+        watchlistRemove: async ticker => { items = items.filter(row => row.ticker !== ticker); return items; },
+        onBatchProgress: callback => { window.__progress = callback; },
+        runBatch: input => { window.__batchArgs = input; return new Promise(resolve => { window.__finish = resolve; }); },
+        run: async () => { if (window.__singleFailure) return { code: 1, reportId: null, stopped: false }; window.__singleReport = true; return { code: 0, reportId: 'new-report', stopped: false }; },
+        stop: async () => ({ requested: true }),
+        reportsList: async () => [...(window.__singleReport ? [{ id: 'new-report', ticker: 'AAPL', date: '2026-10-28', title: 'New' }] : []), { id: 'report', ticker: 'AAPL', date: '2026-10-28', title: 'Mock' }],
+        readReport: async id => ({ title: 'Mock', text: `# Trading Analysis Report: AAPL\n\n- Rating: ${id === 'new-report' ? 'Sell' : 'Overweight'}\n\n## V. Portfolio Manager Decision\n\n### Portfolio Manager\n**Rating**: ${id === 'new-report' ? 'Sell' : 'Overweight'}\n\nConditions.` }),
+        screenAShares: async () => { window.__screenCalls++; return { source: 'Mock source', marketDate: '2026-10-28', fetchedAt: '10:00', candidates: [
+          { ticker: '600000.SS', name: '示例甲', profitStatus: 'verified_positive', netProfit: 200000000, reportDate: '2026-06-30', price: 10, turnoverAmount: 100000000 },
+          { ticker: '000001.SZ', name: '示例乙', profitStatus: 'unknown', price: 11 },
+        ], warnings: [] }; },
+      };
+    });
+    await page.goto(pathToFileURL(path.join(__dirname, 'index.html')).href);
+    await page.waitForFunction(() => document.querySelector('#active-profile').value === 'profile');
+    await page.click('[data-ticker="AAPL"]');
+    await page.click('.navigation [data-page="watchlist"]');
+    await page.waitForFunction(() => document.querySelector('#watch-total').textContent === '1');
+    await page.fill('#watch-ticker', 'MSFT'); await page.click('#watch-add-form button');
+    await page.waitForFunction(() => document.querySelector('#watch-total').textContent === '2');
+    await page.fill('#watch-ticker', 'MSFT'); await page.click('#watch-add-form button');
+    assert.equal(await page.locator('.watch-item').count(), 2);
+    await page.click('#watch-run');
+    assert.deepEqual(await page.evaluate(() => window.__batchArgs.tickers), ['AAPL', 'MSFT']);
+    await page.evaluate(() => window.__progress({ ticker: 'AAPL', status: 'completed', code: 0, reportId: 'report' }));
+    await page.waitForFunction(() => document.querySelector('.watch-item').textContent.includes('偏买 · 增持'));
+    if (process.env.WATCHLIST_SCREENSHOT) await page.screenshot({ path: process.env.WATCHLIST_SCREENSHOT });
+    await page.click('#watch-stop');
+    assert.match(await page.textContent('#watch-message'), /停止/);
+    await page.evaluate(() => window.__finish({ results: [{ ticker: 'AAPL', code: 0, reportId: 'report', stopped: false }, { ticker: 'MSFT', code: null, reportId: null, stopped: true }], stopped: true }));
+    await page.waitForFunction(() => document.querySelector('#watch-message').textContent.includes('批次已停止'));
+    await page.click('.navigation [data-page="analysis"]');
+    await page.fill('#ticker', 'AAPL'); await page.click('#run');
+    await page.waitForFunction(() => document.querySelector('#status').textContent.includes('报告已保存'));
+    await page.click('.navigation [data-page="watchlist"]');
+    await page.waitForFunction(() => document.querySelector('.watch-item').textContent.includes('卖出'));
+    await page.evaluate(() => { window.__singleFailure = true; });
+    await page.click('.navigation [data-page="analysis"]'); await page.click('#run');
+    await page.waitForFunction(() => document.querySelector('#status').textContent.includes('运行失败'));
+    await page.click('.navigation [data-page="watchlist"]');
+    assert.match(await page.locator('.watch-item').first().innerText(), /卖出/);
+    await page.getByRole('button', { name: '移除 MSFT' }).click();
+    await page.waitForFunction(() => document.querySelector('#watch-total').textContent === '1');
+    await page.click('.navigation [data-page="markets"]');
+    assert.equal(await page.evaluate(() => window.__screenCalls), 0);
+    await page.click('#screen-ashares');
+    await page.waitForSelector('.screen-item');
+    assert.match(await page.locator('#screen-results').innerText(), /已披露盈利候选/);
+    assert.doesNotMatch(await page.locator('#screen-results').innerText(), /示例乙/);
+    assert.match(await page.locator('#screen-status').innerText(), /已排除/);
+    assert.equal(await page.evaluate(() => window.__screenCalls), 1);
+    const sourceStatus = await page.locator('#screen-status').innerText();
+    await page.getByRole('button', { name: /添加 示例甲/ }).click();
+    assert.equal(await page.locator('#screen-status').innerText(), sourceStatus);
+    await page.click('.navigation [data-page="watchlist"]');
+    await page.waitForFunction(() => document.querySelector('#watch-total').textContent === '2');
+    for (const width of [780, 1050, 1760]) {
+      await page.setViewportSize({ width, height: 800 });
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    }
+    assert.deepEqual(external, []);
+    console.log('Watchlist UI passed: add, deduplication, batch status, stop, final rating and explicit candidate screening.');
+  } finally { await browser.close(); }
+})().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,6 +1,12 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('desktop', {
   run: input => ipcRenderer.invoke('run', input),
+  runBatch: input => ipcRenderer.invoke('run-batch', input),
+  onBatchProgress: callback => ipcRenderer.on('batch-progress', (_event, progress) => callback(progress)),
+  watchlist: () => ipcRenderer.invoke('watchlist'),
+  watchlistAdd: input => ipcRenderer.invoke('watchlist-add', input),
+  watchlistRemove: ticker => ipcRenderer.invoke('watchlist-remove', ticker),
+  screenAShares: () => ipcRenderer.invoke('screen-a-shares'),
   stop: () => ipcRenderer.invoke('stop'),
   onStopError: callback => ipcRenderer.on('stop-error', (_event, message) => callback(message)),
   update: () => ipcRenderer.invoke('update'),

@@ -20,7 +20,7 @@ const { officialRepoPath } = require('./repo-path');
   const desktop = path.join(root, 'TradingAgents-Desktop');
   const repo = path.join(root, 'TradingAgents');
   fs.mkdirSync(desktop); fs.mkdirSync(repo);
-  for (const name of ['package.json', 'main.js', 'repo-path.js', 'preload.js', 'analysis-control.js', 'job_supervisor.py', 'memory_transaction.py', 'memory_commit.py', 'model_catalog_bridge.py', 'model-service.js', 'latest-queue.js', 'profile-store.js', 'data-key-store.js', 'fred_guard.py', 'report-store.js', 'environment.js', 'validate.js', 'mask.js', 'strip-control.js', 'index.html', 'style.css', 'renderer.js', 'vendor', 'assets']) {
+  for (const name of ['package.json', 'main.js', 'repo-path.js', 'preload.js', 'analysis-control.js', 'batch-runner.js', 'watchlist-store.js', 'a-share-screener.js', 'job_supervisor.py', 'memory_transaction.py', 'memory_commit.py', 'model_catalog_bridge.py', 'model-service.js', 'latest-queue.js', 'profile-store.js', 'data-key-store.js', 'fred_guard.py', 'report-store.js', 'environment.js', 'validate.js', 'mask.js', 'strip-control.js', 'index.html', 'style.css', 'renderer.js', 'vendor', 'assets']) {
     fs.cpSync(path.join(__dirname, name), path.join(desktop, name), { recursive: true });
   }
   fs.symlinkSync(path.join(officialRepoPath(__dirname), '.venv-win'), path.join(repo, '.venv-win'), 'junction');

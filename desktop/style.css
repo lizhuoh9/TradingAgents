@@ -44,6 +44,38 @@
 .report-date-label{flex:1;min-width:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
 .report-date-count{color:var(--cds-gray-400);font-size:10px;font-weight:500}
 .report-date-items{display:grid;grid-template-columns:minmax(0,1fr);gap:4px;padding:2px 0 7px 8px}
+
+/* Watchlist and public market candidates */
+.watch-count{margin-left:auto;color:var(--cds-gray-450);font-size:11px}
+.home-form-actions{display:flex;align-items:center;gap:8px}
+.watch-toolbar{display:grid;gap:18px;margin-top:28px;padding:22px 24px}
+.watch-add-form,.watch-batch-controls{display:flex;align-items:end;gap:12px;min-width:0}
+.watch-add-form label,.watch-batch-controls label{flex:1;min-width:0;margin:0}
+.watch-add-form button,.watch-batch-controls button{flex:none;height:42px}
+.watch-batch-controls{padding-top:18px;border-top:1px solid var(--line)}
+.watch-note{margin:0;color:var(--cds-gray-500);font-size:11px;line-height:1.6}
+.watch-toolbar #watch-message:empty,.market-screen #screen-status:empty{display:none}
+.watch-toolbar #watch-message,.market-screen #screen-status{margin:0;line-height:1.6}
+.watch-list-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:26px 0 12px}
+.watch-list-heading h2,.market-screen h2{font-size:15px}
+.watch-list-heading h2 span{display:inline-block;margin-left:6px;padding:2px 7px;border-radius:7px;background:var(--cds-gray-50);color:var(--cds-gray-550);font-size:11px}
+.watch-list-heading>span{color:var(--muted);font-size:11px}
+.watch-list{display:grid;gap:8px}
+.watch-item,.screen-item{display:flex;align-items:center;gap:18px;min-width:0;padding:16px 18px;border:1px solid var(--line);border-radius:12px;background:var(--cds-surface-2)}
+.watch-identity{display:flex;flex:0 0 155px;min-width:0;flex-direction:column;gap:5px}
+.watch-identity strong,.watch-result strong{font-size:13px;overflow-wrap:anywhere}
+.watch-identity span,.watch-result span{color:var(--muted);font-size:11px;overflow-wrap:anywhere}
+.watch-result{display:flex;flex:1;min-width:0;flex-direction:column;gap:5px}
+.watch-item-actions{display:flex;gap:14px;align-items:center;flex:none}
+.watch-empty{margin:0;padding:30px 18px;border:1px dashed var(--line);border-radius:12px;color:var(--muted);font-size:12px;text-align:center}
+.market-screen{margin-top:32px;padding-top:25px;border-top:1px solid var(--line)}
+.market-screen-heading{display:flex;align-items:center;justify-content:space-between;gap:15px}
+.market-screen-heading p{margin:6px 0 0;color:var(--muted);font-size:12px}
+.market-screen>.watch-note{margin-top:13px}.market-screen #screen-status{margin:9px 0}
+.screen-group{margin-top:20px}.screen-group h3{margin:0 0 10px;font-size:12px;color:var(--cds-gray-650)}
+.screen-item{margin-bottom:8px;padding:12px 15px}.screen-stats{flex:1;min-width:0;color:var(--cds-gray-600);font-size:11px;line-height:1.7;overflow-wrap:anywhere}.screen-item button{flex:none}
+@media(max-width:850px){.watch-batch-controls{flex-wrap:wrap}.watch-batch-controls label{flex:1 1 180px}.watch-item,.screen-item{flex-wrap:wrap;gap:10px 15px}.watch-identity{flex-basis:130px}.watch-item-actions{margin-left:auto}.screen-stats{flex-basis:calc(100% - 150px)}}
+@media(max-width:500px){.home-form-actions{flex-wrap:wrap;justify-content:end}.watch-add-form{flex-wrap:wrap}.watch-add-form label{flex-basis:100%}.watch-item,.screen-item{padding:13px}.watch-identity{flex-basis:100%}.screen-stats{flex-basis:100%}}
 .fred-form{margin-top:20px}.fred-form>p.quiet{margin:6px 0 18px}.fred-form .composer-footer{justify-content:space-between}
 
 .report-rating{display:flex;align-items:baseline;flex-wrap:wrap;gap:5px 12px;margin:12px 0 15px;padding:14px 16px;border:1px solid rgba(169,79,55,.12);border-radius:10px;background:var(--cds-surface-0)}

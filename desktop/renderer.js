@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const pageNames = { analysis: '新建分析', reader: '报告阅读', markets: '市场与代码', settings: 'API 设置' };
+const pageNames = { analysis: '新建分析', watchlist: '我的自选', reader: '报告阅读', markets: '市场与代码', settings: 'API 设置' };
 let profileState = { profiles: [], selectedId: null };
 let profileLoadError = '';
 let editingId = null;
@@ -10,6 +10,11 @@ let selectedReportId = null;
 const reportGroupsOpen = new Map();
 let latestReportId = null;
 let analysisBusy = false;
+let operationBusy = false;
+let batchBusy = false;
+let watchlist = [];
+let watchRevision = 0;
+const watchResults = new Map();
 let catalogRequest = 0;
 let catalogTimer;
 let catalogInFlight = false;
@@ -33,6 +38,7 @@ function showPage(name) {
   $('page-title').textContent = pageNames[name];
   window.scrollTo(0, 0);
   if (name === 'reader') loadReports();
+  if (name === 'watchlist') { refreshWatchlist(); syncWatchProfiles(); }
 }
 document.querySelectorAll('[data-page]').forEach(button => button.addEventListener('click', () => showPage(button.dataset.page)));
 
@@ -50,6 +56,7 @@ window.desktop.onStopError(message => {
   $('log').textContent = ($('log').textContent + '\n停止失败：' + message).slice(-500000);
   showTaskError('停止请求未完成', '任务可能仍在运行，可以再次尝试停止或等待其结束。');
   $('stop-run').disabled = false;
+  if (batchBusy) { $('watch-message').textContent = '停止失败，请重试：' + message; $('watch-stop').disabled = false; }
 });
 function showTaskError(title, message) {
   $('home-error-title').textContent = title;
@@ -57,12 +64,15 @@ function showTaskError(title, message) {
   $('home-error').hidden = false;
 }
 async function task(fn, message, canStop = false) {
+  if (operationBusy) return;
+  operationBusy = true;
   let finalState = 'idle';
   let errorTitle = '任务未完成';
   let errorMessage = '请查看日志了解原因，已保存的文件不会被删除。';
   $('home-error').hidden = true;
   analysisBusy = canStop;
   $('run').disabled = $('update').disabled = true;
+  renderWatchlist();
   $('open-latest').hidden = true;
   latestReportId = null;
   $('log').textContent = '';
@@ -88,12 +98,14 @@ async function task(fn, message, canStop = false) {
     $('log').textContent += '\n' + error.message;
   } finally {
     analysisBusy = false;
+    operationBusy = false;
     $('run').disabled = $('update').disabled = false;
     $('stop-run').hidden = true;
     $('stop-run').disabled = false;
     document.querySelector('.status-pill').dataset.state = finalState;
     if (finalState === 'error') showTaskError(errorTitle, errorMessage);
     else $('home-error').hidden = true;
+    renderWatchlist();
   }
 }
 $('analysis-form').addEventListener('keydown', event => {
@@ -111,7 +123,14 @@ $('analysis-form').addEventListener('submit', event => {
     return;
   }
   if (!$('active-profile').value) { showPage('settings'); $('settings-message').textContent = profileLoadError || '请先添加并保存模型连接。'; return; }
-  task(() => window.desktop.run({ ticker, date: $('date').value, profileId: $('active-profile').value }), '分析中…', true);
+  const date = $('date').value;
+  task(async () => {
+    const result = await window.desktop.run({ ticker, date, profileId: $('active-profile').value });
+    const completed = result && !result.stopped && result.code === 0 && result.reportId;
+    await addWatchlist({ ticker });
+    if (completed) await updateWatchProgress({ ticker: ticker.toUpperCase(), status: 'completed', reportId: result.reportId, date });
+    return result;
+  }, '分析中…', true);
 });
 $('ticker').addEventListener('input', () => { $('ticker-hint').textContent = '例如 NVDA、600172.SS、000001.SZ、0700.HK'; });
 $('update').addEventListener('click', () => { showPage('analysis'); task(() => window.desktop.update(), '更新中…'); });
@@ -129,7 +148,7 @@ $('stop-run').addEventListener('click', async () => {
     $('log').textContent += '\n停止失败：' + error.message;
   } finally { if (analysisBusy) $('stop-run').disabled = false; }
 });
-document.querySelectorAll('[data-ticker]').forEach(button => button.addEventListener('click', () => { $('ticker').value = button.dataset.ticker; $('ticker').focus(); }));
+document.querySelectorAll('[data-ticker]').forEach(button => button.addEventListener('click', () => { $('ticker').value = button.dataset.ticker; $('ticker').focus(); addWatchlist({ ticker: button.dataset.ticker }); }));
 
 function renderProfiles(state) {
   profileState = state;
@@ -142,6 +161,7 @@ function renderProfiles(state) {
     const option = document.createElement('option'); option.value = profile.id; option.textContent = profile.model ? `${profile.name} · ${profile.model}` : profile.name; select.append(option);
   }
   select.value = state.selectedId || '';
+  syncWatchProfiles();
   const list = $('profiles-list'); list.replaceChildren();
   $('profiles-status').textContent = profileLoadError || (state.profiles.length ? '选择连接以查看或编辑。' : '尚未添加模型连接。');
   for (const profile of state.profiles) {
@@ -500,9 +520,9 @@ function isTableSeparator(line) {
 }
 
 // Render a safe Markdown subset as DOM; unsupported syntax stays visible as text.
-function renderMarkdown(source) {
-  const root = $('report-content'); root.replaceChildren();
-  const toc = $('report-toc-items'); toc.replaceChildren();
+function renderMarkdown(source, summaryOnly = false) {
+  const root = summaryOnly ? document.createElement('div') : $('report-content'); root.replaceChildren();
+  const toc = summaryOnly ? document.createElement('div') : $('report-toc-items'); toc.replaceChildren();
   const lines = String(source).replace(/\r\n?/g, '\n').split('\n');
   const fragment = document.createDocumentFragment();
   let i = 0; const headings = [];
@@ -595,8 +615,8 @@ function renderMarkdown(source) {
     button.addEventListener('click', () => node.scrollIntoView({ block: 'start', behavior: 'smooth' }));
     toc.append(button);
   }
-  $('report-toc').hidden = tocHeadings.length < 2;
-  renderFinalDecision(headings, lines);
+  if (!summaryOnly) $('report-toc').hidden = tocHeadings.length < 2;
+  return renderFinalDecision(headings, lines, !summaryOnly);
 }
 
 function isReportSectionBoundary(node) {
@@ -654,10 +674,11 @@ function renderRating(decision, lines, nodes) {
   const detail = document.createElement('p'); detail.className = 'report-rating-detail';
   detail.textContent = conflict ? '报告中的评级不一致，请核对下方原文。' : rating ? rating[1] : '请阅读下方原文，不要据此推断买卖方向。';
   wrapper.append(title, original, detail); decision.append(wrapper);
+  return title.textContent;
 }
 
-function renderFinalDecision(headings, lines) {
-  const previous = $('reader-document').querySelector('.report-decision');
+function renderFinalDecision(headings, lines, attach = true) {
+  const previous = attach && $('reader-document').querySelector('.report-decision');
   if (previous) previous.remove();
   const decision = document.createElement('section'); decision.className = 'report-decision';
   const label = document.createElement('h3'); label.className = 'report-decision-label'; label.textContent = '最终交易建议'; decision.append(label);
@@ -667,7 +688,8 @@ function renderFinalDecision(headings, lines) {
   if (manager?.tagName === 'H3' && /^Portfolio Manager$/i.test(manager.textContent)) {
     for (let node = manager.nextElementSibling; node && !isReportSectionBoundary(node); node = node.nextElementSibling) nodes.push(node);
   }
-  renderRating(decision, lines, nodes);
+  const rating = renderRating(decision, lines, nodes);
+  if (!attach) return rating;
   const hasContent = nodes.some(node => !/^H[1-6]$/.test(node.tagName) && node.textContent.trim());
   if (hasContent) {
     const content = document.createElement('div'); content.className = 'report-decision-content report-content';
@@ -681,6 +703,7 @@ function renderFinalDecision(headings, lines) {
     decision.append(empty);
   }
   $('report-toc').before(decision);
+  return rating;
 }
 
 async function openReport(entry) {
@@ -717,6 +740,174 @@ $('open-reports').addEventListener('click', async () => {
   catch (error) { $('reports-status').textContent = error.message; }
 });
 
+function syncWatchProfiles() {
+  const select = $('watch-profile');
+  const current = select.value;
+  select.replaceChildren();
+  if (!profileState.profiles.length) {
+    const option = document.createElement('option'); option.value = ''; option.textContent = '请先在 API 设置中添加连接'; select.append(option);
+  }
+  for (const profile of profileState.profiles) {
+    const option = document.createElement('option'); option.value = profile.id; option.textContent = profile.model ? `${profile.name} · ${profile.model}` : profile.name; select.append(option);
+  }
+  select.value = profileState.profiles.some(profile => profile.id === current) ? current : profileState.selectedId || '';
+}
+
+function renderWatchlist() {
+  const list = $('watch-list'); list.replaceChildren();
+  $('watch-total').textContent = String(watchlist.length);
+  $('watch-count').textContent = watchlist.length ? String(watchlist.length) : '';
+  $('watch-empty').hidden = watchlist.length > 0;
+  $('watch-run').disabled = batchBusy || operationBusy || !watchlist.length;
+  $('watch-add-form').querySelector('button').disabled = batchBusy;
+  $('watch-stop').hidden = !batchBusy;
+  for (const item of watchlist) {
+    const row = document.createElement('article'); row.className = 'watch-item';
+    const identity = document.createElement('div'); identity.className = 'watch-identity';
+    const ticker = document.createElement('strong'); ticker.textContent = item.ticker;
+    const name = document.createElement('span'); name.textContent = item.name || '自选标的';
+    identity.append(ticker, name);
+    const result = watchResults.get(item.ticker);
+    const info = document.createElement('div'); info.className = 'watch-result';
+    const status = document.createElement('strong'); status.textContent = result?.label || '尚无分析';
+    const meta = document.createElement('span'); meta.textContent = result?.detail || '添加后可逐只分析';
+    info.append(status, meta);
+    const actions = document.createElement('div'); actions.className = 'watch-item-actions';
+    if (result?.reportId) {
+      const open = document.createElement('button'); open.type = 'button'; open.className = 'text-button'; open.textContent = '阅读报告 →';
+      open.addEventListener('click', () => openWatchReport(result.reportId)); actions.append(open);
+    }
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'text-button'; remove.textContent = '移除'; remove.disabled = batchBusy;
+    remove.setAttribute('aria-label', `移除 ${item.ticker}`); remove.addEventListener('click', () => removeWatchlist(item.ticker)); actions.append(remove);
+    row.append(identity, info, actions); list.append(row);
+  }
+}
+
+async function refreshWatchlist() {
+  if (!window.desktop.watchlist) { $('watch-message').textContent = '自选功能不可用，请重启应用。'; return; }
+  const revision = ++watchRevision;
+  try {
+    const items = await window.desktop.watchlist();
+    if (revision !== watchRevision) return;
+    watchlist = items; renderWatchlist();
+    loadWatchReports(revision);
+  } catch (error) { if (revision === watchRevision) $('watch-message').textContent = '读取自选失败：' + error.message; }
+}
+
+async function loadWatchReports(revision) {
+  if (!window.desktop.reportsList || !window.desktop.readReport) return;
+  try {
+    const reports = await window.desktop.reportsList();
+    for (const item of watchlist) {
+      if (revision !== watchRevision) return;
+      if (watchResults.has(item.ticker)) continue;
+      const entry = reports.find(report => report.ticker === item.ticker);
+      if (!entry) continue;
+      try {
+        const report = await window.desktop.readReport(entry.id);
+        if (revision !== watchRevision || watchResults.has(item.ticker)) continue;
+        watchResults.set(item.ticker, { label: renderMarkdown(report.text, true), detail: entry.date || '已保存报告', reportId: entry.id });
+        renderWatchlist();
+      } catch { /* The report may have disappeared since the list was read. */ }
+    }
+  } catch { /* Reports remain optional when editing a watchlist. */ }
+}
+
+async function addWatchlist(item) {
+  if (!window.desktop.watchlistAdd) return;
+  const revision = ++watchRevision;
+  try {
+    const items = await window.desktop.watchlistAdd(item);
+    if (revision !== watchRevision) return;
+    watchlist = items; renderWatchlist();
+    $('watch-message').textContent = `已加入自选：${item.ticker.toUpperCase()}`;
+    $('watch-add-status').textContent = '';
+  } catch (error) {
+    $('watch-message').textContent = '添加自选失败：' + error.message;
+    $('watch-add-status').textContent = '添加自选失败：' + error.message;
+    if (document.querySelector('[data-view="analysis"]:not([hidden])')) showTaskError('添加自选失败', error.message);
+  }
+}
+
+async function removeWatchlist(ticker) {
+  const revision = ++watchRevision;
+  try {
+    const items = await window.desktop.watchlistRemove(ticker);
+    if (revision !== watchRevision) return;
+    watchlist = items; watchResults.delete(ticker); renderWatchlist();
+    $('watch-message').textContent = `已移除 ${ticker}`;
+  } catch (error) { $('watch-message').textContent = '移除自选失败：' + error.message; }
+}
+
+async function openWatchReport(id) {
+  try {
+    const reports = await window.desktop.reportsList();
+    const report = reports.find(entry => entry.id === id);
+    if (!report) { $('watch-message').textContent = '报告不存在，请刷新后重试。'; return; }
+    $('report-search').value = ''; showPage('reader'); openReport(report);
+  } catch (error) { $('watch-message').textContent = '打开报告失败：' + error.message; }
+}
+
+async function updateWatchProgress(event) {
+  const labels = { waiting: '等待分析', running: '分析中…', completed: '报告已保存', failed: '分析失败', stopped: '已停止', cancelled: '已取消' };
+  if (!event || !labels[event.status]) return;
+  const detail = event.error || (event.code != null && event.code !== 0 ? `退出码 ${event.code}` : '');
+  const item = { label: labels[event.status], detail, reportId: event.reportId || null };
+  watchResults.set(event.ticker, item); renderWatchlist();
+  if (event.status === 'completed' && event.reportId && window.desktop.readReport) {
+    try {
+      const report = await window.desktop.readReport(event.reportId);
+      if (watchResults.get(event.ticker) !== item) return;
+      item.label = renderMarkdown(report.text, true); item.detail = `${event.date || $('watch-date').value} · 已保存报告`; renderWatchlist();
+    } catch { if (watchResults.get(event.ticker) === item) { item.detail = '报告读取失败，请在报告库中重试。'; renderWatchlist(); } }
+  }
+}
+
+if (window.desktop.onBatchProgress) window.desktop.onBatchProgress(updateWatchProgress);
+$('watch-date').value = $('date').value;
+$('watch-add-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const ticker = $('watch-ticker').value.trim();
+  if (!ticker) return;
+  await addWatchlist({ ticker });
+  if (watchlist.some(item => item.ticker === ticker.toUpperCase())) $('watch-ticker').value = '';
+});
+$('watch-add-current').addEventListener('click', () => addWatchlist({ ticker: $('ticker').value.trim() }));
+$('watch-run').addEventListener('click', async () => {
+  if (batchBusy || operationBusy || !watchlist.length) return;
+  if (!window.desktop.runBatch) { $('watch-message').textContent = '批量分析功能不可用，请重启应用。'; return; }
+  const tickers = watchlist.map(item => item.ticker);
+  const date = $('watch-date').value; const profileId = $('watch-profile').value;
+  if (!date || !profileId) { $('watch-message').textContent = '请选择分析日期和模型连接。'; return; }
+  batchBusy = analysisBusy = operationBusy = true;
+  $('run').disabled = $('update').disabled = true;
+  $('stop-run').hidden = false; $('stop-run').disabled = false;
+  $('open-latest').hidden = true; $('log').textContent = '';
+  $('status').textContent = '批量分析中…'; document.querySelector('.status-pill').dataset.state = 'busy';
+  for (const ticker of tickers) watchResults.set(ticker, { label: '等待分析', detail: '' });
+  $('watch-message').textContent = `正在逐只分析 ${tickers.length} 个标的。`; renderWatchlist();
+  try {
+    const result = await window.desktop.runBatch({ tickers, date, profileId });
+    const failed = result.results.filter(item => item.error || (!item.stopped && (item.code !== 0 || !item.reportId))).length;
+    $('watch-message').textContent = result.stopped ? '批次已停止；已完成的报告保留在本机。' : failed ? `批次结束，${failed} 项未完成；请查看对应状态与日志。` : '批次已完成，报告保存在本机。';
+    $('status').textContent = result.stopped ? '批次已停止' : failed ? '批次结束，部分未完成' : '批次完成';
+    document.querySelector('.status-pill').dataset.state = result.stopped ? 'stopped' : failed ? 'error' : 'complete';
+  } catch (error) {
+    $('watch-message').textContent = '批量分析失败：' + error.message;
+    $('status').textContent = '批量分析失败'; document.querySelector('.status-pill').dataset.state = 'error';
+    for (const ticker of tickers) if (watchResults.get(ticker)?.label === '等待分析') watchResults.set(ticker, { label: '未开始', detail: '批次启动失败' });
+  } finally {
+    batchBusy = analysisBusy = operationBusy = false;
+    $('run').disabled = $('update').disabled = false;
+    $('stop-run').hidden = true; $('watch-stop').disabled = false; renderWatchlist();
+  }
+});
+$('watch-stop').addEventListener('click', async () => {
+  $('watch-stop').disabled = true;
+  try { const result = await window.desktop.stop(); if (result.requested && batchBusy) $('watch-message').textContent = '正在停止当前分析，并取消剩余任务…'; }
+  catch (error) { $('watch-message').textContent = '停止失败：' + error.message; if (batchBusy) $('watch-stop').disabled = false; }
+});
+
 const markets = [
   ['美国 · NYSE / Nasdaq', [['苹果','AAPL'],['微软','MSFT'],['英伟达','NVDA'],['标普 500 ETF','SPY']]],
   ['中国内地 · 上海 / 深圳', [['贵州茅台','600519.SS'],['中国平安','601318.SS'],['平安银行','000001.SZ'],['宁德时代','300750.SZ']]],
@@ -739,7 +930,7 @@ for (const [market, allExamples] of markets) {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'market-item';
     const label = document.createElement('span'); label.textContent = name;
     const code = document.createElement('code'); code.textContent = ticker;
-    button.append(label, code); button.addEventListener('click', () => { $('ticker').value = ticker; showPage('analysis'); $('ticker').focus(); }); card.append(button);
+    button.append(label, code); button.addEventListener('click', () => { $('ticker').value = ticker; showPage('analysis'); $('ticker').focus(); addWatchlist({ ticker, name }); }); card.append(button);
   }
   list.append(card); count += examples.length;
 }
@@ -747,6 +938,47 @@ $('market-status').textContent = count ? '' : '没有匹配的市场或代码。
 }
 $('market-search').addEventListener('input', renderMarkets);
 renderMarkets();
+function renderScreenResult(result) {
+  const root = $('screen-results'); root.replaceChildren();
+  const candidates = Array.isArray(result.candidates) ? result.candidates : [];
+  const verified = candidates.filter(item => item.profitStatus === 'verified_positive' && typeof item.netProfit === 'number' && Number.isFinite(item.netProfit) && item.netProfit > 0);
+  const groups = [['已披露盈利候选', verified]];
+  for (const [title, items] of groups) {
+    if (!items.length) continue;
+    const section = document.createElement('section'); section.className = 'screen-group';
+    const heading = document.createElement('h3'); heading.textContent = `${title} · ${items.length}`; section.append(heading);
+    for (const item of items) {
+      const row = document.createElement('article'); row.className = 'screen-item';
+      const identity = document.createElement('div'); identity.className = 'watch-identity';
+      const label = document.createElement('strong'); label.textContent = item.name || item.ticker;
+      const code = document.createElement('span'); code.textContent = item.ticker;
+      identity.append(label, code);
+      const stats = document.createElement('div'); stats.className = 'screen-stats';
+      const text = (label, value, suffix = '') => `${label} ${typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) + suffix : '暂无'}`;
+      const values = [text('价格', item.price), text('涨跌', item.changePercent, '%'), text('换手', item.turnoverPercent, '%'), text('成交额', typeof item.turnoverAmount === 'number' ? item.turnoverAmount / 100000000 : null, '亿元')];
+      if (item.profitStatus === 'verified_positive') values.push(text('归母净利润', typeof item.netProfit === 'number' ? item.netProfit / 100000000 : null, '亿元'));
+      stats.textContent = values.join(' · ') + (item.reportDate ? ` · 财报 ${item.reportDate}` : '') + (item.announcementDate ? ` · 披露 ${item.announcementDate}` : '');
+      const add = document.createElement('button'); add.type = 'button'; add.className = 'button button-subtle'; add.textContent = '＋ 自选';
+      add.setAttribute('aria-label', `添加 ${item.name || item.ticker} 到自选`);
+      add.addEventListener('click', async () => { await addWatchlist({ ticker: item.ticker, name: item.name || '' }); $('screen-action-status').textContent = $('watch-message').textContent; });
+      row.append(identity, stats, add); section.append(row);
+    }
+    root.append(section);
+  }
+  if (!verified.length) { const empty = document.createElement('p'); empty.className = 'watch-empty'; empty.textContent = '本次没有符合筛选条件的候选。'; root.append(empty); }
+  return candidates.length - verified.length;
+}
+$('screen-ashares').addEventListener('click', async () => {
+  if (!window.desktop.screenAShares) { $('screen-status').textContent = '候选筛选暂不可用，请重启应用。'; return; }
+  $('screen-ashares').disabled = true; $('screen-action-status').textContent = ''; $('screen-status').textContent = '正在读取公开行情与财务数据…';
+  try {
+    const result = await window.desktop.screenAShares();
+    const excluded = renderScreenResult(result);
+    const messages = [result.source || '公开数据', result.marketDate ? `行情日期 ${result.marketDate}` : '行情日期未提供', result.fetchedAt ? `获取时间 ${result.fetchedAt}` : '', result.cached ? '本地缓存' : '', excluded ? `${excluded} 条盈利条件未通过，已排除` : '', ...(Array.isArray(result.warnings) ? result.warnings : [])].filter(Boolean);
+    $('screen-status').textContent = messages.join(' · ');
+  } catch (error) { $('screen-results').replaceChildren(); $('screen-status').textContent = '筛选失败：' + error.message; }
+  finally { $('screen-ashares').disabled = false; }
+});
 toggleProvider();
 scheduleModelCatalog();
 loadProfiles();

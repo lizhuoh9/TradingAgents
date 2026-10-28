@@ -6,7 +6,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node --test test.js stop.test.js model-service.test.js repo-path.test.js ticker.test.js"
+    "test": "node --test test.js stop.test.js model-service.test.js repo-path.test.js ticker.test.js watchlist.test.js batch-runner.test.js a-share-screener.test.js"
   },
   "devDependencies": {
     "electron": "^45.0.0"

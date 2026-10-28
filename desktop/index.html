@@ -12,6 +12,7 @@
     <div class="nav-caption">工作区</div>
     <nav class="navigation" aria-label="页面导航">
       <button class="nav-item active" data-page="analysis" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M4 12h16"/></svg> 新建分析</button>
+      <button class="nav-item" data-page="watchlist" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9z"/></svg> 自选 <span id="watch-count" class="watch-count"></span></button>
       <button class="nav-item" data-page="reader" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h10l4 4v12H5zM15 4v4h4M8 12h8M8 16h8"/></svg> 报告阅读</button>
       <button class="nav-item" data-page="markets" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c-3 3-3 13 0 16M12 4c3 3 3 13 0 16"/></svg> 市场与代码</button>
       <button class="nav-item" data-page="settings" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg> API 设置</button>
@@ -28,12 +29,18 @@
               <div class="home-card-heading"><div><p class="home-section-label">NEW RESEARCH</p><h2>新建分析</h2><p>设置本次研究的标的、日期与模型</p></div></div>
               <div class="field-row"><label for="ticker">股票或资产代码<input id="ticker" value="NVDA" maxlength="25" required spellcheck="false" aria-describedby="ticker-hint"><small id="ticker-hint">例如 NVDA、0700.HK、BTC-USD</small></label><label for="date">分析日期<input id="date" type="date" required></label></div>
               <label for="active-profile">模型连接<select id="active-profile"></select><small>可在 API 设置中添加和切换连接。</small></label>
-              <div class="composer-footer"><span class="composer-note"><span class="home-note-dot" aria-hidden="true"></span> 市场 · 新闻 · 股票基本面</span><button id="run" class="button button-primary" type="submit">开始分析 <span aria-hidden="true">↗</span></button></div>
+              <div class="composer-footer"><span class="composer-note"><span class="home-note-dot" aria-hidden="true"></span> 市场 · 新闻 · 股票基本面</span><div class="home-form-actions"><button id="watch-add-current" class="button button-subtle" type="button">＋ 自选</button><button id="run" class="button button-primary" type="submit">开始分析 <span aria-hidden="true">↗</span></button></div></div>
             </form>
             <div class="home-actions"><span>试试这些代码</span><button type="button" class="ticker-chip" data-ticker="AAPL">AAPL</button><button type="button" class="ticker-chip" data-ticker="0700.HK">0700.HK</button><button type="button" class="ticker-chip" data-ticker="600519.SS">600519.SS</button><button type="button" class="text-button" data-page="markets">浏览市场 <span aria-hidden="true">→</span></button></div>
+            <p id="watch-add-status" class="watch-note" role="status" aria-live="polite"></p>
             <p class="privacy-note"><span class="privacy-icon" aria-hidden="true">◌</span>配置和报告保存在本机。分析会连接所选模型和行情服务，可能发送标的、日期、分析内容及相关历史决策。</p>
           </div><section id="activity" class="activity activity-panel" aria-labelledby="activity-heading"><header class="activity-header"><div class="activity-title"><span class="activity-icon" aria-hidden="true">≡</span><span><strong id="activity-heading">运行日志</strong><small>分析与更新进度</small></span></div><span class="status-pill" role="status" aria-live="polite"><span class="status-dot"></span><span id="status">就绪</span></span></header><div class="activity-body"><div id="home-error" class="home-error" role="alert" hidden><span class="home-error-icon" aria-hidden="true">!</span><div><strong id="home-error-title">任务未完成</strong><p id="home-error-message">请查看下方日志了解原因，已保存的文件不会被删除。</p></div></div><div class="activity-actions"><button id="open-latest" type="button" class="text-button" hidden>阅读本次报告 →</button><button id="stop-run" type="button" class="button stop-button" hidden>停止分析</button></div><pre id="log" tabindex="0" aria-label="运行日志内容">等待任务…</pre><p class="activity-footnote">显示最近 50 万字符；分析过程文件保存在本地运行目录。</p></div></section></div>
         </div>
+      </section>
+      <section data-view="watchlist" hidden aria-labelledby="watch-heading">
+        <div class="page-heading"><p class="eyebrow">本机工作区 / WATCHLIST</p><h1 id="watch-heading">我的自选</h1><p>把关注的标的放在一起，逐只分析并查看报告。</p></div>
+        <div class="watch-toolbar composer"><form id="watch-add-form" class="watch-add-form"><label for="watch-ticker">股票或资产代码<input id="watch-ticker" maxlength="25" placeholder="例如 600172.SS" required></label><button class="button button-subtle" type="submit">＋ 添加</button></form><div class="watch-batch-controls"><label for="watch-date">分析日期<input id="watch-date" type="date" required></label><label for="watch-profile">模型连接<select id="watch-profile"></select></label><button id="watch-run" class="button button-primary" type="button">分析全部</button><button id="watch-stop" class="button button-subtle" type="button" hidden>停止批次</button></div><p class="watch-note">逐只调用所选模型和行情服务，可能产生 API 费用；自选保存在本机。 <button class="text-button" data-page="analysis" type="button">查看运行日志 →</button></p><p id="watch-message" class="quiet" role="status" aria-live="polite"></p></div>
+        <div class="watch-list-heading"><h2>关注的标的 <span id="watch-total">0</span></h2><span>最新分析与报告</span></div><div id="watch-list" class="watch-list"></div><p id="watch-empty" class="watch-empty">还没有自选。输入代码添加，或从“市场与代码”选择。</p>
       </section>
       <section data-view="reader" hidden aria-labelledby="reader-heading">
         <div class="reader-heading"><div><p class="eyebrow">研究资料 / 本机工作区</p><h1 id="reader-heading">你的研究报告</h1><p>回顾分析过程，整理每一次研究。</p></div><button id="refresh-reports" class="button reader-refresh" type="button"><span aria-hidden="true">↻</span> 刷新</button></div>
@@ -44,6 +51,7 @@
         <div class="page-heading"><p class="eyebrow">市场参考</p><h1 id="markets-heading">市场与代码</h1><p>选择示例代码可直接带入分析。代码采用行情源的市场后缀。</p></div>
         <label class="search-field market-search"><span class="sr-only">搜索市场或代码</span><input id="market-search" type="search" placeholder="搜索市场、公司或代码" autocomplete="off"></label><p id="market-status" class="quiet" role="status"></p>
         <div id="market-list" class="market-grid"></div><p class="footnote">示例仅供查找，具体数据覆盖和可用性取决于数据源。</p>
+        <section class="market-screen"><div class="market-screen-heading"><div><h2>A 股热门候选</h2><p>按成交额排序，最多核查 20 只符合条件的沪深 A 股的已公告归母净利润。</p></div><button id="screen-ashares" class="button button-subtle" type="button">筛选 A 股候选</button></div><p class="watch-note">这是成交额靠前股票的有限筛选，并非完整 A 股或人气榜；未能核实盈利的股票会排除。点击后访问公开行情与财务数据，不发送自选或 API 密钥。历史盈利不代表未来盈利，候选不构成收益保证。</p><p id="screen-status" class="quiet" role="status" aria-live="polite"></p><p id="screen-action-status" class="quiet" role="status" aria-live="polite"></p><div id="screen-results"></div></section>
       </section>
       <section data-view="settings" hidden aria-labelledby="settings-heading">
         <div class="page-heading"><p class="eyebrow">模型连接</p><h1 id="settings-heading">API 设置</h1><p>保存多个模型连接，并在分析时切换。</p></div>

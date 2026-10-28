@@ -21,7 +21,7 @@ npm start
 
 ## 测试
 
-在 `desktop` 目录执行 `npm test`。Python 检查可用官方虚拟环境执行 `..\..\TradingAgents\.venv-win\Scripts\python.exe -m unittest test_model_catalog test_memory_transaction test_fred_guard`。界面端到端测试为维护者可选检查：安装 Playwright（`npm install --no-save playwright` 和 `npx playwright install chromium`）后运行 `node reader.e2e.cjs`、`node rating-ui.e2e.cjs`、`node report-groups.e2e.cjs` 、`node model-ui.e2e.cjs`、`node fred-ui.e2e.cjs` 和 `node ticker-ui.e2e.cjs`。`node connection.e2e.cjs` 启动隔离的 Electron 和本机模拟接口，在 Windows 上创建目录联接可能需要开发者模式或相应权限。浏览器测试可通过 `READER_BROWSER_EXECUTABLE` 或 `MODEL_UI_BROWSER_EXECUTABLE` 指定本机浏览器。
+在 `desktop` 目录执行 `npm test`。Python 检查可用官方虚拟环境执行 `..\..\TradingAgents\.venv-win\Scripts\python.exe -m unittest test_model_catalog test_memory_transaction test_fred_guard`。界面端到端测试为维护者可选检查：安装 Playwright（`npm install --no-save playwright` 和 `npx playwright install chromium`）后运行 `node reader.e2e.cjs`、`node rating-ui.e2e.cjs`、`node report-groups.e2e.cjs` 、`node model-ui.e2e.cjs`、`node fred-ui.e2e.cjs`、`node ticker-ui.e2e.cjs` 和 `node watchlist-ui.e2e.cjs`。`node connection.e2e.cjs` 和 `node watchlist-electron.e2e.cjs` 启动隔离的 Electron 和本机模拟接口，在 Windows 上创建目录联接可能需要开发者模式或相应权限。浏览器测试可通过 `READER_BROWSER_EXECUTABLE` 或 `MODEL_UI_BROWSER_EXECUTABLE` 指定本机浏览器。
 
 编辑连接时可从本机安装的官方模型目录中选择，或手动输入其他模型 ID。本地目录不会访问网络，也不代表账户权限。点击“测试连接并获取模型”后，程序会向所选兼容接口的模型列表地址发送鉴权密钥并读取结果；不会发送股票、报告或历史记录，但服务可看到连接信息。为保护密钥，测试不会跟随重定向。非兼容协议如果不支持该测试，可使用本地目录或手动填写。通用兼容地址若与官方项目登记的某个 HTTPS 服务地址及标准路径精确匹配，分析时使用对应的官方客户端；连接地址和密钥保持不变。其他地址继续使用通用客户端。
 
@@ -42,6 +42,10 @@ CLI 偏好位置通过当前官方版本的内部接口指定；若上游更新�
 分析进行时可在运行日志处点击“停止分析”。程序只停止当前分析的 Windows 任务组，不停止官方更新；已发送给服务的请求无法撤回。中断时保留运行目录、已有日志与未完成报告，但未完成报告不会列入完整报告库。共享决策历史在运行期间使用独立副本，只有分析自然结束、报告存在且共享历史未被其他程序更改后才原子提交；冲突或提交失败时保留本次副本和未完成标记，不覆盖共享历史。
 
 报告阅读器在本机按常见 Markdown 结构排版，支持标题、粗体、列表、引用、代码和常见表格。为避免改变财务表达式，单星号内容与无法安全识别的复杂结构保留原文；报告内的外部链接和图片不会自动访问网络。
+
+“自选”保存在本机 `local-data/watchlist.json`。首次使用时会从已有完整报告的代码初始化；可以添加或移除标的。批量分析按顺序逐只调用所选模型和行情服务，可能产生 API 费用；停止批次会停止当前任务并取消尚未开始的任务，已经完成的报告保留。每只股票显示的是报告中的最终评级，而非保证收益。
+
+“A 股热门候选”由用户点击后读取东方财富公开延迟行情和财务摘要；东方财富行情不可用时会使用腾讯公开行情，并继续核验东方财富财报，不上传自选、API 密钥或报告。筛选按成交额排序，最多核查 20 只符合条件的沪深股票，并要求最近已公告财报中的归母净利润为正；缺少财报的标的排除。它并非完整 A 股筛选或人气榜，历史盈利不预测未来收益。接口不可用时会显示错误或明确标注近期本地缓存、行情日期及数据时效；公开数据源可能限流或变更。
 
 分析采用官方联网流程：行情服务可能收到标的、查询日期及连接信息；所选模型服务可能收到标的、日期、分析上下文和本程序此前决策的相关内容。桌面程序关闭继承的 LangChain/LangSmith 追踪配置，不会自动沿用环境中的额外行情服务密钥或 SEC 联系信息，因此需要密钥的可选数据源可能不可用。股票分析包含行情、新闻和基本面；加密资产分析包含行情和新闻。运行依赖有效的模型连接、账户额度和数据源可用性。
 

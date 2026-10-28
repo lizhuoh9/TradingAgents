@@ -14,6 +14,9 @@ const { cleanEnvironment } = require('./environment');
 const { createAnalysisControl } = require('./analysis-control');
 const { createLatestQueue } = require('./latest-queue');
 const { credentialForRequest, fetchAvailableModels } = require('./model-service');
+const { createWatchlistStore, normalizeWatchItem, MAX_WATCHLIST } = require('./watchlist-store');
+const { createBatchRunner } = require('./batch-runner');
+const { createAShareScreener } = require('./a-share-screener');
 
 const { officialRepoPath } = require('./repo-path');
 const repo = officialRepoPath(__dirname);
@@ -68,6 +71,9 @@ if (!hasLock) app.quit();
 else app.whenReady().then(() => {
   const profiles = createProfileStore(path.join(__dirname, 'local-data', 'api-profiles.bin'), safeStorage);
   const fred = createDataKeyStore(path.join(__dirname, 'local-data', 'fred-key.bin'), safeStorage);
+  const watchlist = createWatchlistStore(path.join(__dirname, 'local-data', 'watchlist.json'));
+  const screener = createAShareScreener({ cacheFile: path.join(__dirname, 'local-data', 'a-share-cache.json') });
+  let screening = null;
   const reportStore = createReportStore(reports);
   const win = new BrowserWindow({ width: 1050, height: 800, minWidth: 780, minHeight: 620,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
@@ -78,14 +84,7 @@ else app.whenReady().then(() => {
   app.on('second-instance', () => { if (win.isMinimized()) win.restore(); win.show(); win.focus(); });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', e => e.preventDefault());
-  ipcMain.handle('run', async (_event, input) => {
-    if (running) throw new Error('已有任务正在运行');
-    if (fs.existsSync(updateMarker)) throw new Error('上次更新未完成，请先重新点击更新官方项目');
-    validate(input);
-    const profile = profiles.get(input.profileId);
-    const fredKey = fred.get();
-    running = true;
-    try {
+  async function runOneAnalysis(input, profile, fredKey) {
       const env = cleanEnvironment(process.env);
       const now = new Date();
       const stamp = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('') + '-' + [now.getHours(), now.getMinutes(), now.getSeconds()].map(n => String(n).padStart(2, '0')).join('');
@@ -118,9 +117,66 @@ else app.whenReady().then(() => {
         }
       }
       return { code, reportId, stopped };
-    } finally { running = false; }
+  }
+  let batchRunner = null;
+  ipcMain.handle('run', async (_event, input) => {
+    if (running) throw new Error('已有任务正在运行');
+    if (fs.existsSync(updateMarker)) throw new Error('上次更新未完成，请先重新点击更新官方项目');
+    validate(input);
+    const profile = profiles.get(input.profileId);
+    const fredKey = fred.get();
+    running = true;
+    try { return await runOneAnalysis(input, profile, fredKey); }
+    finally { running = false; }
   });
-  ipcMain.handle('stop', () => analysisControl.stop());
+  ipcMain.handle('run-batch', async (_event, input) => {
+    if (running) throw new Error('已有任务正在运行');
+    if (fs.existsSync(updateMarker)) throw new Error('上次更新未完成，请先重新点击更新官方项目');
+    if (!input || !Array.isArray(input.tickers) || !input.tickers.length || input.tickers.length > MAX_WATCHLIST) throw new Error('请选择需要分析的自选股票');
+    const tickers = input.tickers.map(ticker => normalizeWatchItem({ ticker }).ticker);
+    if (new Set(tickers).size !== tickers.length) throw new Error('批量列表中包含重复股票');
+    for (const ticker of tickers) validate({ ticker, date: input.date });
+    const profile = profiles.get(input.profileId);
+    const fredKey = fred.get();
+    running = true;
+    batchRunner = createBatchRunner({
+      runOne: async ticker => {
+        try { return await runOneAnalysis({ ticker, date: input.date, profileId: input.profileId }, profile, fredKey); }
+        catch (error) {
+          const strip = createControlStripper();
+          const mask = createMask([profile.key, fredKey]);
+          const detail = mask(strip(String(error?.message || '无法启动或保存分析')), true).slice(0, 1000);
+          if (!win.isDestroyed()) win.webContents.send('log', `\n${ticker} 分析出错：${detail}\n`);
+          throw error;
+        }
+      },
+      stopActive: () => analysisControl.stop(),
+      notify: progress => {
+        if (win.isDestroyed()) return;
+        if (progress.status === 'running') win.webContents.send('log', `\n──── ${progress.ticker} · 开始分析 ────\n`);
+        if (progress.status === 'failed') win.webContents.send('log', `\n${progress.ticker} 分析未完成，请查看上方日志。\n`);
+        win.webContents.send('batch-progress', progress);
+      },
+    });
+    try { return await batchRunner.start(tickers); }
+    finally { batchRunner = null; running = false; }
+  });
+  ipcMain.handle('stop', () => batchRunner?.isActive() ? batchRunner.stop() : analysisControl.stop());
+  ipcMain.handle('watchlist', () => watchlist.initialize(() => reportStore.list()));
+  ipcMain.handle('watchlist-add', (_event, input) => {
+    const item = normalizeWatchItem(input);
+    watchlist.initialize(() => reportStore.list());
+    return watchlist.add(item);
+  });
+  ipcMain.handle('watchlist-remove', (_event, ticker) => {
+    const item = normalizeWatchItem({ ticker });
+    watchlist.initialize(() => reportStore.list());
+    return watchlist.remove(item.ticker);
+  });
+  ipcMain.handle('screen-a-shares', () => {
+    if (!screening) screening = screener.screen().finally(() => { screening = null; });
+    return screening;
+  });
   ipcMain.handle('update', async () => {
     if (running) throw new Error('分析或更新正在运行');
     if (modelCatalogQueue.isBusy()) throw new Error('模型目录读取中，请稍后更新');
