@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "version": "0.2.0",
-  "hostVersion": "0.2.0",
+  "version": "0.3.0",
+  "hostVersion": "0.3.0",
   "files": {
-    "index.html": "a8f4e2c83cb192d253c3e3973c988a4c13d3037933e3e1cd5bcf0bceff9289e8",
-    "renderer.js": "d4172fd6f453eacd2a65a8656aef8d4c8f9f7bbf0e2377e135371b293397a746",
-    "style.css": "0947e698b9fb1d57ba42b6a2e3b84eeef92aace76984b607c4e2ecca6d01484d"
+    "index.html": "706295263512b7b22e2f62113fa900fda25d2617e0704bf80efdf868def9ba89",
+    "renderer.js": "78284071346788baf16a7658ccff0f6f7f205fad0d666010bc5c7981dd089dd1",
+    "style.css": "5ee28793b93cbbb16b8118b8797258b336497dd8709310508e3dc43291641e4e"
   }
 }

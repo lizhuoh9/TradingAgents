@@ -11,12 +11,15 @@ const assert = require('node:assert/strict');
     const external = [];
     page.on('request', request => { if (/^https?:/i.test(request.url())) external.push(request.url()); });
     await page.addInitScript(() => {
-      let items = []; window.__screenCalls = 0; window.__batchArgs = null; window.__singleReport = false; window.__singleFailure = false;
+      let items = []; let holdings = []; window.__screenCalls = 0; window.__batchArgs = null; window.__singleReport = false; window.__singleFailure = false;
       window.desktop = {
         onLog() {}, onStopError() {}, profiles: async () => ({ profiles: [{ id: 'profile', name: 'Mock', model: 'test' }], selectedId: 'profile' }),
         watchlist: async () => items,
         watchlistAdd: async item => { const ticker = item.ticker.toUpperCase(); if (!items.some(row => row.ticker === ticker)) items = [...items, { ticker, name: item.name || '' }]; return items; },
         watchlistRemove: async ticker => { items = items.filter(row => row.ticker !== ticker); return items; },
+        holdings: async () => holdings,
+        holdingsAdd: async item => { if (!holdings.some(row => row.ticker === item.ticker.toUpperCase())) holdings = [...holdings, { ticker: item.ticker.toUpperCase(), name: item.name || '' }]; return holdings; },
+        holdingsRemove: async ticker => { holdings = holdings.filter(row => row.ticker !== ticker); return holdings; },
         onBatchProgress: callback => { window.__progress = callback; },
         runBatch: input => { window.__batchArgs = input; return new Promise(resolve => { window.__finish = resolve; }); },
         run: async () => { if (window.__singleFailure) return { code: 1, reportId: null, stopped: false }; window.__singleReport = true; return { code: 0, reportId: 'new-report', stopped: false }; },
@@ -31,15 +34,39 @@ const assert = require('node:assert/strict');
     });
     await page.goto(pathToFileURL(path.join(__dirname, 'index.html')).href);
     await page.waitForFunction(() => document.querySelector('#active-profile').value === 'profile');
+    await page.click('#screen-home');
+    await page.waitForSelector('.screen-item');
+    assert.equal(await page.evaluate(() => window.__screenCalls), 1);
+    await page.getByRole('button', { name: '选择分析 示例甲' }).click();
+    assert.equal(await page.inputValue('#ticker'), '600000.SS');
+    assert.equal(await page.evaluate(() => window.__singleReport), false);
+    await page.click('.navigation [data-page="holdings"]');
+    await page.fill('#holdings-ticker', '600000.SS'); await page.fill('#holdings-name', '示例甲');
+    await page.click('#holdings-add-form button');
+    await page.waitForFunction(() => document.querySelector('#holdings-total').textContent === '1');
+    await page.getByRole('button', { name: '选择分析持仓 600000.SS' }).click();
+    assert.equal(await page.inputValue('#ticker'), '600000.SS');
+    assert.equal(await page.evaluate(() => window.__singleReport), false);
+    await page.click('.navigation [data-page="holdings"]');
+    await page.getByRole('button', { name: '移除持仓 600000.SS' }).click();
+    await page.waitForFunction(() => document.querySelector('#holdings-total').textContent === '0');
+    await page.click('.navigation [data-page="analysis"]');
     await page.click('[data-ticker="AAPL"]');
+    await page.click('#run');
+    await page.waitForFunction(() => document.querySelector('#status').textContent.includes('报告已保存'));
+    await page.click('.navigation [data-page="watchlist"]');
+    await page.waitForFunction(() => document.querySelector('#watch-total').textContent === '0');
+    await page.click('.navigation [data-page="analysis"]');
+    await page.click('#watch-add-current');
     await page.click('.navigation [data-page="watchlist"]');
     await page.waitForFunction(() => document.querySelector('#watch-total').textContent === '1');
+    await page.evaluate(() => { window.__singleReport = false; });
     await page.fill('#watch-ticker', 'MSFT'); await page.click('#watch-add-form button');
     await page.waitForFunction(() => document.querySelector('#watch-total').textContent === '2');
     await page.fill('#watch-ticker', 'MSFT'); await page.click('#watch-add-form button');
     assert.equal(await page.locator('.watch-item').count(), 2);
     await page.click('.navigation [data-page="watchlist"]');
-    await page.waitForFunction(() => document.querySelector('.watch-item').textContent.includes('偏买 · 增持'));
+    await page.waitForFunction(() => document.querySelector('.watch-item').textContent.includes('卖出'));
     await page.click('#watch-run');
     assert.deepEqual(await page.evaluate(() => window.__batchArgs.tickers), ['AAPL', 'MSFT']);
     assert.equal(await page.locator('#watch-date').isDisabled(), true);
@@ -68,13 +95,17 @@ const assert = require('node:assert/strict');
     await page.getByRole('button', { name: '移除 MSFT' }).click();
     await page.waitForFunction(() => document.querySelector('#watch-total').textContent === '1');
     await page.click('.navigation [data-page="markets"]');
-    assert.equal(await page.evaluate(() => window.__screenCalls), 0);
+    await page.getByRole('button', { name: /贵州茅台/ }).click();
+    await page.click('.navigation [data-page="watchlist"]');
+    await page.waitForFunction(() => document.querySelector('#watch-total').textContent === '1');
+    await page.click('.navigation [data-page="markets"]');
+    assert.equal(await page.evaluate(() => window.__screenCalls), 1);
     await page.click('#screen-ashares');
     await page.waitForSelector('.screen-item');
     assert.match(await page.locator('#screen-results').innerText(), /已披露盈利候选/);
     assert.doesNotMatch(await page.locator('#screen-results').innerText(), /示例乙/);
     assert.match(await page.locator('#screen-status').innerText(), /已排除/);
-    assert.equal(await page.evaluate(() => window.__screenCalls), 1);
+    assert.equal(await page.evaluate(() => window.__screenCalls), 2);
     const sourceStatus = await page.locator('#screen-status').innerText();
     await page.getByRole('button', { name: /添加 示例甲/ }).click();
     assert.equal(await page.locator('#screen-status').innerText(), sourceStatus);

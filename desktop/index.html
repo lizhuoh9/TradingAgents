@@ -13,6 +13,7 @@
     <nav class="navigation" aria-label="页面导航">
       <button class="nav-item active" data-page="analysis" type="button" aria-current="page" aria-label="新建分析" title="新建分析"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M4 12h16"/></svg><span class="nav-label">新建分析</span></button>
       <button class="nav-item" data-page="watchlist" type="button" aria-label="自选" title="自选"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9z"/></svg><span class="nav-label">自选</span><span id="watch-count" class="watch-count"></span></button>
+      <button class="nav-item" data-page="holdings" type="button" aria-label="持仓" title="持仓"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5h8v2M3 12h18"/></svg><span class="nav-label">持仓</span></button>
       <button class="nav-item" data-page="reader" type="button" aria-label="报告阅读" title="报告阅读"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h10l4 4v12H5zM15 4v4h4M8 12h8M8 16h8"/></svg><span class="nav-label">报告阅读</span></button>
       <button class="nav-item" data-page="markets" type="button" aria-label="市场与代码" title="市场与代码"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c-3 3-3 13 0 16M12 4c3 3 3 13 0 16"/></svg><span class="nav-label">市场与代码</span></button>
       <button class="nav-item" data-page="settings" type="button" aria-label="API 设置" title="API 设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg><span class="nav-label">API 设置</span></button>
@@ -32,6 +33,7 @@
               <div class="composer-footer"><div class="home-form-actions"><button id="watch-add-current" class="button button-subtle" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9z"/></svg>加入自选</button><button id="run" class="button button-primary" type="submit">开始分析 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></button></div></div>
             </form>
             <div class="home-actions"><span>试试这些代码</span><button type="button" class="ticker-chip" data-ticker="AAPL">AAPL</button><button type="button" class="ticker-chip" data-ticker="0700.HK">0700.HK</button><button type="button" class="ticker-chip" data-ticker="600519.SS">600519.SS</button><button type="button" class="text-button" data-page="markets">浏览市场 <span aria-hidden="true">→</span></button></div>
+            <button id="screen-home" class="button button-subtle" type="button">分析 A 股 · 快速筛选候选 →</button>
             <p id="watch-add-status" class="watch-note" role="status" aria-live="polite"></p>
             <p class="privacy-note"><svg class="privacy-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6zM8 12l3 3 5-6"/></svg><span>配置和报告保存在本机。分析会连接所选模型和行情服务，可能发送标的、日期、分析内容及相关历史决策。</span></p>
           </div>
@@ -55,7 +57,13 @@
           <p class="watch-note">逐只调用所选模型和行情服务，可能产生 API 费用；自选保存在本机。 <button class="text-button" data-page="analysis" type="button">查看运行日志 →</button></p><p id="watch-message" class="quiet" role="status" aria-live="polite"></p>
         </div>
         <form id="watch-add-form" class="watch-add-form"><label for="watch-ticker"><span class="sr-only">股票或资产代码</span><input id="watch-ticker" maxlength="25" placeholder="添加股票代码，例如 600172.SS" required></label><button class="button button-subtle" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>添加自选</button></form>
-        <div class="watch-list-heading"><h2>关注的标的 <span id="watch-total">0</span></h2><span>最新分析与报告</span></div><div id="watch-list" class="watch-list"></div><p id="watch-empty" class="watch-empty">还没有自选。输入代码添加，或从“市场与代码”选择。</p>
+        <div class="watch-list-heading"><h2>关注的标的 <span id="watch-total">0</span></h2><span>最新分析与报告</span></div><div id="watch-list" class="watch-list"></div><p id="watch-empty" class="watch-empty">还没有自选。输入代码添加，或在分析页和候选列表点击“加入自选”。</p>
+      </section>
+      <section data-view="holdings" hidden aria-labelledby="holdings-heading">
+        <div class="page-heading"><h1 id="holdings-heading">我的持仓</h1><p>记录实际持有的标的，需要时选择单只分析。</p></div>
+        <p class="watch-note">持仓名单仅保存在本机；这里只记录股票代码和名称，不计算成本、数量或盈亏。选择分析后，请在分析页确认并启动。</p>
+        <form id="holdings-add-form" class="watch-add-form"><label for="holdings-ticker"><span class="sr-only">持仓股票代码</span><input id="holdings-ticker" maxlength="25" placeholder="股票代码，例如 600172.SS" required></label><label for="holdings-name"><span class="sr-only">股票名称（可选）</span><input id="holdings-name" maxlength="100" placeholder="名称（可选）"></label><button class="button button-subtle" type="submit">＋ 添加持仓</button></form>
+        <p id="holdings-message" class="quiet" role="status" aria-live="polite"></p><div class="watch-list-heading"><h2>持有的标的 <span id="holdings-total">0</span></h2></div><div id="holdings-list" class="watch-list"></div><p id="holdings-empty" class="watch-empty">还没有持仓。输入代码添加。</p>
       </section>
       <section data-view="reader" hidden aria-labelledby="reader-heading">
         <div class="reader-heading"><div><h1 id="reader-heading">研究报告</h1><p>先看最终建议，再回顾分析依据。</p></div><button id="refresh-reports" class="button reader-refresh" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 8a7 7 0 0 0-12-2L5 8m0-4v4h4M5 16a7 7 0 0 0 12 2l2-2m0 4v-4h-4"/></svg>刷新</button></div>
@@ -65,7 +73,7 @@
       <section data-view="markets" hidden aria-labelledby="markets-heading">
         <div class="page-heading"><h1 id="markets-heading">市场与代码</h1><p>发现研究候选，或快速找到熟悉的股票代码。</p></div>
         <section class="market-screen" aria-labelledby="market-screen-title"><div class="market-screen-heading"><div><h2 id="market-screen-title">A 股热门候选</h2><p>按成交额排序，最多核查 20 只符合条件的沪深 A 股的已公告归母净利润。</p></div><button id="screen-ashares" class="button button-primary" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6 7v6l-4 2v-8z"/></svg>筛选 A 股候选</button></div><p class="watch-note">这是成交额靠前股票的有限筛选，并非完整 A 股或人气榜；未能核实盈利的股票会排除。点击后访问公开行情与财务数据，不发送自选或 API 密钥。历史盈利不代表未来盈利，候选不构成收益保证。</p><p id="screen-status" class="quiet" role="status" aria-live="polite"></p><p id="screen-action-status" class="quiet" role="status" aria-live="polite"></p><div id="screen-results"></div></section>
-        <div class="market-directory-heading"><div><h2>代码速查</h2><p>点击代码加入自选，并带入新建分析。</p></div><label class="search-field market-search"><span class="sr-only">搜索市场或代码</span><input id="market-search" type="search" placeholder="搜索市场、公司或代码" autocomplete="off"></label></div><p id="market-status" class="quiet" role="status"></p>
+        <div class="market-directory-heading"><div><h2>代码速查</h2><p>点击代码带入新建分析；可在分析页手动加入自选。</p></div><label class="search-field market-search"><span class="sr-only">搜索市场或代码</span><input id="market-search" type="search" placeholder="搜索市场、公司或代码" autocomplete="off"></label></div><p id="market-status" class="quiet" role="status"></p>
         <div id="market-list" class="market-grid"></div><p class="footnote">代码采用行情源的市场后缀。示例仅供查找，具体数据覆盖和可用性取决于数据源。</p>
       </section>
       <section data-view="settings" hidden aria-labelledby="settings-heading">

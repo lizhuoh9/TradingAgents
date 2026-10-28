@@ -32,13 +32,18 @@ test('an unreadable watchlist is never overwritten', t => {
   assert.equal(fs.readFileSync(file, 'utf8'), '{broken');
 });
 
-test('only the first visit imports valid completed report tickers', t => {
+test('reports are never imported and existing watchlists are preserved', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'watchlist-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'watchlist.json'); const store = createWatchlistStore(file);
-  const reports = [ { ticker: 'aapl' }, { ticker: 'AAPL' }, { ticker: '600172.SS' }, { ticker: '600172' }, { ticker: '' } ];
-  assert.deepEqual(store.initialize(() => reports).map(item => item.ticker), ['AAPL', '600172.SS']);
-  store.remove('AAPL'); store.remove('600172.SS');
-  assert.deepEqual(store.initialize(() => { throw new Error('must not re-import'); }), []);
-  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), []);
+  const reports = () => { throw new Error('reports must not be read'); };
+  assert.deepEqual(store.initialize(reports), []);
+  assert.equal(fs.existsSync(file), false);
+  const original = [{ ticker: 'AAPL', name: 'Apple' }];
+  fs.writeFileSync(file, JSON.stringify(original));
+  assert.deepEqual(store.initialize(reports), original);
+  store.add({ ticker: 'MSFT' });
+  assert.deepEqual(store.initialize(reports).map(item => item.ticker), ['AAPL', 'MSFT']);
+  store.remove('AAPL'); store.remove('MSFT');
+  assert.deepEqual(store.initialize(reports), []);
 });

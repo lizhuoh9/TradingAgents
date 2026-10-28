@@ -209,19 +209,24 @@ function createAShareScreener({ cacheFile, request = requestJson, now = () => Da
         }
         const { marketDate, items } = market;
         const stale = staleWarning(marketDate, marketAge(marketDate, now()));
-        const financial = await mapConcurrent(items, 2, async item => {
+        const financial = [];
+        const checkFinance = async item => {
           try {
             const code = item.ticker.slice(0, 6);
             const financeUrl = buildUrl(FINANCE_URL, { reportName: 'RPT_LICO_FN_CPD', columns: 'ALL', filter: `(SECURITY_CODE="${code}")`, pageSize: 4, pageNumber: 1, sortColumns: 'REPORTDATE', sortTypes: -1, source: 'WEB', client: 'WEB' });
             return parseFinance(await request(financeUrl), code, marketDate);
           } catch { return null; }
-        });
+        };
+        for (let offset = 0; offset < items.length; offset += 5) {
+          financial.push(...await mapConcurrent(items.slice(offset, offset + 5), 5, checkFinance));
+          if (financial.filter(row => row?.netProfit > 0).length >= 5) break;
+        }
         const verified = financial.filter(Boolean).length;
         if (!verified) throw new Error('无法核实候选股票的历史财务数据，请稍后重试');
-        const candidates = items.flatMap((item, index) => financial[index]?.netProfit > 0 ? [{ ...item, ...financial[index], profitStatus: 'verified_positive' }] : []);
+        const candidates = items.slice(0, financial.length).flatMap((item, index) => financial[index]?.netProfit > 0 ? [{ ...item, ...financial[index], profitStatus: 'verified_positive' }] : []).slice(0, 5);
         const unknownCount = financial.length - verified;
-        const result = { source, fetchedAt: new Date(now()).toISOString(), marketDate, candidates, evaluatedCount: items.length, unknownCount, cached: false,
-          warnings: ['依据沪深 A 股成交额筛选活跃股，并核验已公告的归母净利润；过去盈利不代表未来收益。', ...(source === TENCENT_SOURCE ? ['东方财富行情暂不可用，已使用腾讯备用行情；榜单仅用于选取候选，展示及排序采用逐股行情记录。'] : []), ...(stale ? [stale] : []), ...(unknownCount ? [`${unknownCount} 只股票财务数据未能核实，已排除。`] : [])] };
+        const result = { source, fetchedAt: new Date(now()).toISOString(), marketDate, candidates, evaluatedCount: financial.length, unknownCount, cached: false,
+          warnings: [`按成交额顺序核查了 ${financial.length} 只沪深 A 股，找到最多 5 只已公告归母净利润为正的候选；过去盈利不代表未来收益。`, ...(source === TENCENT_SOURCE ? ['东方财富行情暂不可用，已使用腾讯备用行情；榜单仅用于选取候选，展示及排序采用逐股行情记录。'] : []), ...(stale ? [stale] : []), ...(unknownCount ? [`${unknownCount} 只股票财务数据未能核实，已排除。`] : [])] };
         try { writeCache(cacheFile, result); } catch { result.warnings.push('无法保存本地缓存，本次结果仍可查看。'); }
         return result;
       } catch (error) {

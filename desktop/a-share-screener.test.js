@@ -47,7 +47,7 @@ test('screen returns only verified historical profit and marks failures instead 
     return finance(code, code === '600123' ? 50 : -50);
   };
   const result = await createAShareScreener({ cacheFile, request, now }).screen();
-  assert.equal(maxActive, 2);
+  assert.equal(maxActive, 3);
   assert.equal(result.evaluatedCount, 3);
   assert.equal(result.unknownCount, 1);
   assert.deepEqual(result.candidates.map(x => x.ticker), ['600123.SS']);
@@ -63,6 +63,21 @@ test('screen returns only verified historical profit and marks failures instead 
   fs.writeFileSync(cacheFile, JSON.stringify(corrupted));
   await assert.rejects(() => createAShareScreener({ cacheFile, request: async () => { throw new Error('offline'); }, now }).screen(), /不可用/);
   await assert.rejects(() => createAShareScreener({ cacheFile, request: async () => { throw new Error('offline'); }, now: () => now() + 8 * 86400000 }).screen(), /不可用/);
+});
+
+test('checks turnover order in bounded batches and stops after five verified candidates', async () => {
+  const codes = Array.from({ length: 12 }, (_, n) => `600${String(n).padStart(3, '0')}`);
+  const checked = [];
+  const request = async url => {
+    const u = new URL(url);
+    if (u.hostname === 'push2delay.eastmoney.com') return { data: { diff: codes.map((code, n) => quote(code, 1, 100 - n)) } };
+    const code = u.searchParams.get('filter').match(/\d{6}/)[0]; checked.push(code);
+    return finance(code, code === codes[0] ? -1 : 10);
+  };
+  const result = await createAShareScreener({ request, now }).screen();
+  assert.equal(result.evaluatedCount, 10);
+  assert.equal(checked.length, 10);
+  assert.deepEqual(result.candidates.map(item => item.ticker), codes.slice(1, 6).map(code => `${code}.SS`));
 });
 
 test('all missing financial data is an error, not an empty profitable list', async () => {

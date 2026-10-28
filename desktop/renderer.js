@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const pageNames = { analysis: '新建分析', watchlist: '我的自选', reader: '报告阅读', markets: '市场与代码', settings: 'API 设置' };
+const pageNames = { analysis: '新建分析', watchlist: '我的自选', holdings: '我的持仓', reader: '报告阅读', markets: '市场与代码', settings: 'API 设置' };
 let profileState = { profiles: [], selectedId: null };
 let profileLoadError = '';
 let editingId = null;
@@ -49,6 +49,7 @@ function showPage(name) {
   }
   if (name === 'reader') loadReports();
   if (name === 'watchlist') { refreshWatchlist(); syncWatchProfiles(); }
+  if (name === 'holdings') refreshHoldings();
 }
 document.querySelectorAll('[data-page]').forEach(button => button.addEventListener('click', () => showPage(button.dataset.page)));
 
@@ -169,7 +170,6 @@ $('analysis-form').addEventListener('submit', event => {
   task(async () => {
     const result = await window.desktop.run({ ticker, date, profileId: $('active-profile').value });
     const completed = result && !result.stopped && result.code === 0 && result.reportId;
-    await addWatchlist({ ticker });
     if (completed) await updateWatchProgress({ ticker: ticker.toUpperCase(), status: 'completed', reportId: result.reportId, date });
     return result;
   }, '分析中…', true);
@@ -276,7 +276,7 @@ $('stop-run').addEventListener('click', async () => {
     $('log').textContent += '\n停止失败：' + error.message;
   } finally { if (analysisBusy) $('stop-run').disabled = false; }
 });
-document.querySelectorAll('[data-ticker]').forEach(button => button.addEventListener('click', () => { $('ticker').value = button.dataset.ticker; $('ticker').focus(); addWatchlist({ ticker: button.dataset.ticker }); }));
+document.querySelectorAll('[data-ticker]').forEach(button => button.addEventListener('click', () => { $('ticker').value = button.dataset.ticker; $('ticker').focus(); }));
 
 function renderProfiles(state) {
   profileState = state;
@@ -919,6 +919,8 @@ function renderWatchlist() {
     const meta = document.createElement('span'); meta.textContent = result?.detail || '添加后可逐只分析';
     info.append(status, meta);
     const actions = document.createElement('div'); actions.className = 'watch-item-actions';
+    const analyze = document.createElement('button'); analyze.type = 'button'; analyze.className = 'text-button'; analyze.textContent = '选择分析 →';
+    analyze.setAttribute('aria-label', `选择分析 ${item.ticker}`); analyze.addEventListener('click', () => selectForAnalysis(item.ticker)); actions.append(analyze);
     if (result?.reportId) {
       const open = document.createElement('button'); open.type = 'button'; open.className = 'text-button'; open.textContent = result.previousReport ? '阅读上次报告 →' : '阅读报告 →';
       open.addEventListener('click', () => openWatchReport(result.reportId)); actions.append(open);
@@ -977,7 +979,7 @@ async function addWatchlist(item) {
     if (revision !== watchRevision) return;
     watchlist = items; renderWatchlist();
     $('watch-message').textContent = `已加入自选：${item.ticker.toUpperCase()}`;
-    $('watch-add-status').textContent = '';
+    $('watch-add-status').textContent = `已加入自选：${item.ticker.toUpperCase()}`;
   } catch (error) {
     $('watch-message').textContent = '添加自选失败：' + error.message;
     $('watch-add-status').textContent = '添加自选失败：' + error.message;
@@ -1030,6 +1032,50 @@ $('watch-add-form').addEventListener('submit', async event => {
   if (watchlist.some(item => item.ticker === ticker.toUpperCase())) $('watch-ticker').value = '';
 });
 $('watch-add-current').addEventListener('click', () => addWatchlist({ ticker: $('ticker').value.trim() }));
+
+function selectForAnalysis(ticker) {
+  $('ticker').value = ticker; showPage('analysis'); $('ticker').focus();
+}
+
+let holdings = [];
+let holdingsRevision = 0;
+function renderHoldings() {
+  const list = $('holdings-list'); list.replaceChildren();
+  $('holdings-total').textContent = String(holdings.length);
+  $('holdings-empty').hidden = holdings.length > 0;
+  for (const item of holdings) {
+    const row = document.createElement('article'); row.className = 'watch-item';
+    const avatar = document.createElement('span'); avatar.className = 'watch-avatar'; avatar.setAttribute('aria-hidden', 'true'); avatar.textContent = item.ticker.slice(0, 2);
+    const identity = document.createElement('div'); identity.className = 'watch-identity';
+    const name = document.createElement('strong'); name.textContent = stockName(item.ticker, item.name);
+    const code = document.createElement('span'); code.textContent = item.ticker; identity.append(name, code);
+    const actions = document.createElement('div'); actions.className = 'watch-item-actions';
+    const analyze = document.createElement('button'); analyze.type = 'button'; analyze.className = 'text-button'; analyze.textContent = '选择分析 →';
+    analyze.setAttribute('aria-label', `选择分析持仓 ${item.ticker}`); analyze.addEventListener('click', () => selectForAnalysis(item.ticker));
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'text-button'; remove.textContent = '移除';
+    remove.setAttribute('aria-label', `移除持仓 ${item.ticker}`); remove.addEventListener('click', () => changeHoldings(() => window.desktop.holdingsRemove(item.ticker), `已移除 ${item.ticker}`));
+    actions.append(analyze, remove); row.append(avatar, identity, actions); list.append(row);
+  }
+}
+async function refreshHoldings() {
+  if (!window.desktop.holdings) { $('holdings-message').textContent = '持仓功能不可用，请重启应用。'; return; }
+  const revision = ++holdingsRevision;
+  try { const items = await window.desktop.holdings(); if (revision === holdingsRevision) { holdings = items; renderHoldings(); } }
+  catch (error) { if (revision === holdingsRevision) $('holdings-message').textContent = '读取持仓失败：' + error.message; }
+}
+async function changeHoldings(action, success) {
+  const revision = ++holdingsRevision;
+  try { const items = await action(); if (revision !== holdingsRevision) return false; holdings = items; renderHoldings(); $('holdings-message').textContent = success; return true; }
+  catch (error) { $('holdings-message').textContent = '更新持仓失败：' + error.message; return false; }
+}
+$('holdings-add-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!window.desktop.holdingsAdd) { $('holdings-message').textContent = '持仓功能不可用，请重启应用。'; return; }
+  const ticker = $('holdings-ticker').value.trim(); const name = $('holdings-name').value.trim();
+  const button = event.currentTarget.querySelector('button'); button.disabled = true;
+  try { if (await changeHoldings(() => window.desktop.holdingsAdd({ ticker, name }), `已添加持仓：${ticker.toUpperCase()}`)) { $('holdings-ticker').value = ''; $('holdings-name').value = ''; } }
+  finally { button.disabled = false; }
+});
 $('watch-run').addEventListener('click', async () => {
   if (batchBusy || operationBusy || !watchlist.length) return;
   if (!window.desktop.runBatch) { $('watch-message').textContent = '批量分析功能不可用，请重启应用。'; return; }
@@ -1096,7 +1142,7 @@ for (const [market, allExamples] of markets) {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'market-item';
     const label = document.createElement('span'); label.textContent = name;
     const code = document.createElement('code'); code.textContent = ticker;
-    button.append(label, code); button.addEventListener('click', () => { $('ticker').value = ticker; showPage('analysis'); $('ticker').focus(); addWatchlist({ ticker, name }); }); card.append(button);
+    button.append(label, code); button.addEventListener('click', () => selectForAnalysis(ticker)); card.append(button);
   }
   list.append(card); count += examples.length;
 }
@@ -1108,7 +1154,7 @@ function renderScreenResult(result) {
   const root = $('screen-results'); root.replaceChildren();
   const candidates = Array.isArray(result.candidates) ? result.candidates : [];
   const verified = candidates.filter(item => item.profitStatus === 'verified_positive' && typeof item.netProfit === 'number' && Number.isFinite(item.netProfit) && item.netProfit > 0);
-  const groups = [['已披露盈利候选', verified]];
+  const groups = [['已披露盈利候选（按成交额，最多展示 5 只）', verified.slice(0, 5)]];
   for (const [title, items] of groups) {
     if (!items.length) continue;
     const section = document.createElement('section'); section.className = 'screen-group';
@@ -1127,7 +1173,9 @@ function renderScreenResult(result) {
       const add = document.createElement('button'); add.type = 'button'; add.className = 'button button-subtle'; add.textContent = '＋ 自选';
       add.setAttribute('aria-label', `添加 ${item.name || item.ticker} 到自选`);
       add.addEventListener('click', async () => { await addWatchlist({ ticker: item.ticker, name: item.name || '' }); $('screen-action-status').textContent = $('watch-message').textContent; });
-      row.append(identity, stats, add); section.append(row);
+      const analyze = document.createElement('button'); analyze.type = 'button'; analyze.className = 'button button-subtle'; analyze.textContent = '选择分析';
+      analyze.setAttribute('aria-label', `选择分析 ${item.name || item.ticker}`); analyze.addEventListener('click', () => selectForAnalysis(item.ticker));
+      row.append(identity, stats, add, analyze); section.append(row);
     }
     root.append(section);
   }
@@ -1145,6 +1193,7 @@ $('screen-ashares').addEventListener('click', async () => {
   } catch (error) { $('screen-results').replaceChildren(); $('screen-status').textContent = '筛选失败：' + error.message; }
   finally { $('screen-ashares').disabled = false; }
 });
+$('screen-home').addEventListener('click', () => { showPage('markets'); $('screen-ashares').click(); });
 toggleProvider();
 scheduleModelCatalog();
 loadProfiles();

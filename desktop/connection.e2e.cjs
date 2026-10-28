@@ -22,7 +22,7 @@ const { officialRepoPath } = require('./repo-path');
   fs.mkdirSync(desktop); fs.mkdirSync(repo);
   // Keep this unrelated connection/batch fixture offline; update transport has its own tests.
   fs.writeFileSync(path.join(desktop, 'update-service.js'), `module.exports = { recoverUiUpdate() {}, createUpdateService: () => ({ check: async () => ({ checkedAt: null, kernel: { status: 'unknown' }, ui: { status: 'unknown' } }) }) };`);
-  for (const name of ['package.json', 'main.js', 'repo-path.js', 'preload.js', 'analysis-control.js', 'batch-runner.js', 'watchlist-store.js', 'a-share-screener.js', 'job_supervisor.py', 'memory_transaction.py', 'memory_commit.py', 'model_catalog_bridge.py', 'model-service.js', 'latest-queue.js', 'profile-store.js', 'data-key-store.js', 'fred_guard.py', 'report-store.js', 'environment.js', 'validate.js', 'mask.js', 'strip-control.js', 'index.html', 'style.css', 'renderer.js', 'vendor', 'assets']) {
+  for (const name of ['package.json', 'main.js', 'repo-path.js', 'preload.js', 'analysis-control.js', 'batch-runner.js', 'watchlist-store.js', 'holdings-store.js', 'a-share-screener.js', 'job_supervisor.py', 'memory_transaction.py', 'memory_commit.py', 'model_catalog_bridge.py', 'model-service.js', 'latest-queue.js', 'profile-store.js', 'data-key-store.js', 'fred_guard.py', 'report-store.js', 'environment.js', 'validate.js', 'mask.js', 'strip-control.js', 'index.html', 'style.css', 'renderer.js', 'vendor', 'assets']) {
     fs.cpSync(path.join(__dirname, name), path.join(desktop, name), { recursive: true });
   }
   fs.symlinkSync(path.join(officialRepoPath(__dirname), '.venv-win'), path.join(repo, '.venv-win'), 'junction');

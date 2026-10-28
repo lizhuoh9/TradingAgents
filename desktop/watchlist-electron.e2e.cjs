@@ -13,7 +13,7 @@ const assert = require('node:assert/strict');
   fs.mkdirSync(desktop); fs.mkdirSync(repo);
   // Keep this unrelated connection/batch fixture offline; update transport has its own tests.
   fs.writeFileSync(path.join(desktop, 'update-service.js'), `module.exports = { recoverUiUpdate() {}, createUpdateService: () => ({ check: async () => ({ checkedAt: null, kernel: { status: 'unknown' }, ui: { status: 'unknown' } }) }) };`);
-  for (const name of ['package.json', 'main.js', 'preload.js', 'analysis-control.js', 'batch-runner.js', 'watchlist-store.js', 'a-share-screener.js', 'memory_transaction.py', 'model_catalog_bridge.py', 'model-service.js', 'latest-queue.js', 'profile-store.js', 'data-key-store.js', 'fred_guard.py', 'report-store.js', 'environment.js', 'validate.js', 'mask.js', 'strip-control.js', 'index.html', 'style.css', 'renderer.js', 'vendor', 'assets']) {
+  for (const name of ['package.json', 'main.js', 'preload.js', 'analysis-control.js', 'batch-runner.js', 'watchlist-store.js', 'holdings-store.js', 'a-share-screener.js', 'memory_transaction.py', 'model_catalog_bridge.py', 'model-service.js', 'latest-queue.js', 'profile-store.js', 'data-key-store.js', 'fred_guard.py', 'report-store.js', 'environment.js', 'validate.js', 'mask.js', 'strip-control.js', 'index.html', 'style.css', 'renderer.js', 'vendor', 'assets']) {
     fs.cpSync(path.join(__dirname, name), path.join(desktop, name), { recursive: true });
   }
   const locatorFile = path.join(__dirname, 'repo-path.js');
@@ -55,6 +55,10 @@ else:
     await page.fill('#profile-key', 'fictional-key-only');
     await page.click('#save-profile');
     await page.waitForFunction(() => document.querySelector('#settings-message').textContent.includes('连接已保存'), null, { timeout: 30000 });
+    await page.click('.navigation [data-page=holdings]');
+    await page.fill('#holdings-ticker', '600172.SS'); await page.fill('#holdings-name', '测试持仓');
+    await page.click('#holdings-add-form button');
+    await page.waitForFunction(() => document.querySelector('#holdings-total').textContent === '1');
     await page.click('.navigation [data-page=watchlist]');
     for (const ticker of ['AAPL', 'MSFT', 'GOOG']) {
       await page.fill('#watch-ticker', ticker);
@@ -89,6 +93,11 @@ else:
     await app.close(); app = null;
     app = await launch();
     const reopened = await app.firstWindow();
+    await reopened.click('.navigation [data-page=holdings]');
+    await reopened.waitForFunction(() => document.querySelector('#holdings-total').textContent === '1');
+    assert.match(await reopened.locator('#holdings-list').innerText(), /600172.SS/);
+    await reopened.getByRole('button', { name: '移除持仓 600172.SS' }).click();
+    await reopened.waitForFunction(() => document.querySelector('#holdings-total').textContent === '0');
     await reopened.click('.navigation [data-page=watchlist]');
     await reopened.waitForFunction(() => document.querySelectorAll('.watch-item').length === 3);
     await reopened.waitForFunction(() => document.querySelector('.watch-item').textContent.includes('持有 / 观望'));

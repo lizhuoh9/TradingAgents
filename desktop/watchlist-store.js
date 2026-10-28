@@ -41,18 +41,7 @@ function createWatchlistStore(file) {
   }
   return {
     list,
-    initialize(getReports) {
-      if (fs.existsSync(file)) return list();
-      const items = []; const seen = new Set();
-      for (const report of getReports()) {
-        try {
-          const item = normalizeWatchItem({ ticker: report.ticker });
-          if (!seen.has(item.ticker)) { seen.add(item.ticker); items.push(item); }
-          if (items.length === MAX_WATCHLIST) break;
-        } catch { /* Legacy reports may have no valid stock code. */ }
-      }
-      return items.length ? save(items) : [];
-    },
+    initialize: list,
     add(input) {
       const item = normalizeWatchItem(input); const items = list();
       const existing = items.find(entry => entry.ticker === item.ticker);

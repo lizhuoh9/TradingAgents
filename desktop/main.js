@@ -15,6 +15,7 @@ const { createAnalysisControl } = require('./analysis-control');
 const { createLatestQueue } = require('./latest-queue');
 const { credentialForRequest, fetchAvailableModels } = require('./model-service');
 const { createWatchlistStore, normalizeWatchItem, MAX_WATCHLIST } = require('./watchlist-store');
+const { createHoldingsStore } = require('./holdings-store');
 const { createBatchRunner } = require('./batch-runner');
 const { createAShareScreener } = require('./a-share-screener');
 const { createUpdateService, recoverUiUpdate } = require('./update-service');
@@ -76,6 +77,7 @@ else app.whenReady().then(() => {
   const profiles = createProfileStore(path.join(__dirname, 'local-data', 'api-profiles.bin'), safeStorage);
   const fred = createDataKeyStore(path.join(__dirname, 'local-data', 'fred-key.bin'), safeStorage);
   const watchlist = createWatchlistStore(path.join(__dirname, 'local-data', 'watchlist.json'));
+  const holdings = createHoldingsStore(path.join(__dirname, 'local-data', 'holdings.json'));
   const screener = createAShareScreener({ cacheFile: path.join(__dirname, 'local-data', 'a-share-cache.json') });
   let screening = null;
   const reportStore = createReportStore(reports);
@@ -179,6 +181,9 @@ else app.whenReady().then(() => {
     watchlist.initialize(() => reportStore.list());
     return watchlist.remove(item.ticker);
   });
+  ipcMain.handle('holdings', () => holdings.list());
+  ipcMain.handle('holdings-add', (_event, input) => holdings.add(input));
+  ipcMain.handle('holdings-remove', (_event, ticker) => holdings.remove(ticker));
   ipcMain.handle('screen-a-shares', () => {
     if (!screening) screening = screener.screen().finally(() => { screening = null; });
     return screening;
