@@ -19,6 +19,12 @@ npm start
 
 安装后也可双击本目录的 `启动桌面版.cmd`。桌面程序会查找同级的独立 `TradingAgents` 官方目录；若官方源码放在其他位置，可在启动前设置 `TRADINGAGENTS_SOURCE_DIR` 为其绝对路径。不要把本 fork 自身当作官方更新目标：独立目录能保持官方 `main` 的快进更新。使用自己 fork 的其他人可将第一条 clone 地址替换为自己的仓库地址。
 
+## 升级已有桌面程序
+
+本次持仓功能需要新版桌面主程序。已有 Git 检出的用户先关闭桌面程序，在自己的桌面项目仓库根目录执行 `git pull --ff-only`，再进入 `desktop` 执行 `npm ci` 并重新启动。更新前请备份 `desktop/local-data/`；该目录包含本地连接、自选和持仓数据。若有未提交的源码修改，请先自行保存，再处理 Git 的提示。
+
+旧版顶栏的“界面”更新只替换界面文件，不能安装新增的主进程接口；遇到需要新版主程序的提示时，请按上述步骤升级完整桌面程序。非 Git 安装需取得新版完整桌面目录，并将原 `local-data/` 保留或迁移到新版目录后启动，不要覆盖或删除原数据。
+
 ## 测试
 
 在 `desktop` 目录执行 `npm test`。Python 检查可用官方虚拟环境执行 `..\..\TradingAgents\.venv-win\Scripts\python.exe -m unittest test_model_catalog test_memory_transaction test_fred_guard`。界面端到端测试为维护者可选检查：安装 Playwright（`npm install --no-save playwright` 和 `npx playwright install chromium`）后运行 `node reader.e2e.cjs`、`node rating-ui.e2e.cjs`、`node report-groups.e2e.cjs` 、`node model-ui.e2e.cjs`、`node fred-ui.e2e.cjs`、`node ticker-ui.e2e.cjs` 和 `node watchlist-ui.e2e.cjs`。`node connection.e2e.cjs` 和 `node watchlist-electron.e2e.cjs` 启动隔离的 Electron 和本机模拟接口，在 Windows 上创建目录联接可能需要开发者模式或相应权限。浏览器测试可通过 `READER_BROWSER_EXECUTABLE` 或 `MODEL_UI_BROWSER_EXECUTABLE` 指定本机浏览器。
